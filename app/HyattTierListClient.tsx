@@ -58,10 +58,15 @@ type ModalState =
     }
   | null;
 
-type DropTarget = {
+type DropTargetState = {
   tier: Tier;
   beforeHotelId: string | null;
 } | null;
+
+type DropTarget = {
+  tier: Tier;
+  beforeHotelId: string | null;
+};
 
 function createLocalHotel(payload: HotelDraft): HotelRecord {
   const timestamp = new Date().toISOString();
@@ -155,7 +160,7 @@ export function HyattTierListClient({
   const [isHydrated, setIsHydrated] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [draggedHotelId, setDraggedHotelId] = useState<string | null>(null);
-  const [dropTarget, setDropTarget] = useState<DropTarget>(null);
+  const [dropTarget, setDropTarget] = useState<DropTargetState>(null);
   const [recentlyDraggedHotelId, setRecentlyDraggedHotelId] = useState<string | null>(null);
   const [isBrandPaletteOpen, setIsBrandPaletteOpen] = useState(false);
 
