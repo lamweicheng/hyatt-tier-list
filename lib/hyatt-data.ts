@@ -1,4 +1,4 @@
-import type { HotelRecord, HyattBrand, Tier } from './types';
+import type { HotelRecord, HyattBrand, StayType, Tier } from './types';
 
 export const TIERS = ['S', 'A', 'B', 'C', 'D'] as const;
 
@@ -69,8 +69,43 @@ const TIER_WEIGHT: Record<Tier, number> = {
   D: 4
 };
 
+const STAY_TYPE_WEIGHT: Record<StayType, number> = {
+  EXPLORED: 0,
+  FUTURE: 1
+};
+
 export function sortHotelsByTier(hotels: HotelRecord[]) {
   return [...hotels].sort((left, right) => {
+    const byStayType = STAY_TYPE_WEIGHT[left.stayType] - STAY_TYPE_WEIGHT[right.stayType];
+
+    if (byStayType !== 0) {
+      return byStayType;
+    }
+
+    if (left.tier === null && right.tier === null) {
+      const byPositionOnly = left.position - right.position;
+
+      if (byPositionOnly !== 0) {
+        return byPositionOnly;
+      }
+
+      const byNameOnly = left.name.localeCompare(right.name);
+
+      if (byNameOnly !== 0) {
+        return byNameOnly;
+      }
+
+      return left.brand.localeCompare(right.brand);
+    }
+
+    if (left.tier === null) {
+      return 1;
+    }
+
+    if (right.tier === null) {
+      return -1;
+    }
+
     const byTier = TIER_WEIGHT[left.tier] - TIER_WEIGHT[right.tier];
 
     if (byTier !== 0) {

@@ -16,15 +16,22 @@ enum Tier {
   D
 }
 
+enum StayType {
+  EXPLORED
+  FUTURE
+}
+
 model Hotel {
   id        String   @id @default(cuid())
   name      String
   brand     String
-  tier      Tier
+  stayType  StayType @default(EXPLORED)
+  tier      Tier?
+  roomEntries Json?
   position  Int      @default(0)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  @@index([tier, position])
+  @@index([stayType, tier, position])
   @@index([brand])
 }

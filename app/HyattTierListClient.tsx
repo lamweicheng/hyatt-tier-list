@@ -3,15 +3,45 @@
 import { FormEvent, startTransition, useEffect, useMemo, useState } from 'react';
 import { BRAND_BY_NAME, BRANDS_BY_SEGMENT, HYATT_BRANDS, TIERS, sortHotelsByTier } from '@/lib/hyatt-data';
 import { FancySelect } from '@/components/ui/fancy-select';
-import type { HotelDraft, HotelRecord, PersistenceMode, Tier } from '@/lib/types';
+import type {
+  HotelDraft,
+  HotelRecord,
+  PersistenceMode,
+  RoomEntry,
+  RoomEntryKind,
+  StayType,
+  Tier
+} from '@/lib/types';
 
 const LOCAL_STORAGE_KEY = 'hyatt-tier-list.hotels';
 
 const DEFAULT_DRAFT: HotelDraft = {
   name: '',
   brand: HYATT_BRANDS[0].name,
-  tier: 'S'
+  stayType: 'EXPLORED',
+  tier: 'S',
+  roomEntries: []
 };
+
+const EMPTY_ROOM_ENTRY: RoomEntry = {
+  label: '',
+  kind: 'ROOM'
+};
+
+const SUMMARY_TABS: Array<{ id: StayType; label: string }> = [
+  { id: 'EXPLORED', label: 'Explored' },
+  { id: 'FUTURE', label: 'Future' }
+];
+
+const ROOM_KIND_OPTIONS: Array<{ value: RoomEntryKind; label: string }> = [
+  { value: 'ROOM', label: 'Room' },
+  { value: 'SUITE', label: 'Suite' }
+];
+
+const STAY_TYPE_OPTIONS: Array<{ value: StayType; label: string }> = [
+  { value: 'EXPLORED', label: 'Explored' },
+  { value: 'FUTURE', label: 'Future' }
+];
 
 const TIER_STYLES: Record<
   Tier,
@@ -59,31 +89,98 @@ type ModalState =
   | null;
 
 type DropTargetState = {
-  tier: Tier;
+  stayType: StayType;
+  tier: Tier | null;
   beforeHotelId: string | null;
 } | null;
 
 type DropTarget = {
-  tier: Tier;
+  stayType: StayType;
+  tier: Tier | null;
   beforeHotelId: string | null;
 };
+
+function isTier(value: unknown): value is Tier {
+  return TIERS.includes(value as Tier);
+}
+
+function normalizeRoomEntries(value: unknown): RoomEntry[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .filter((entry): entry is Record<string, unknown> => typeof entry === 'object' && entry !== null)
+    .map<RoomEntry>((entry) => ({
+      label: typeof entry.label === 'string' ? entry.label : '',
+      kind: entry.kind === 'SUITE' ? 'SUITE' : 'ROOM'
+    }))
+    .filter((entry) => entry.label.trim().length > 0);
+}
+
+function normalizeHotelRecord(value: unknown): HotelRecord {
+  const raw = (typeof value === 'object' && value !== null ? value : {}) as Record<string, unknown>;
+  const stayType: StayType = raw.stayType === 'FUTURE' ? 'FUTURE' : 'EXPLORED';
+  const tier = stayType === 'EXPLORED' && isTier(raw.tier) ? raw.tier : null;
+  const timestamp = new Date().toISOString();
+
+  return {
+    id: typeof raw.id === 'string' ? raw.id : crypto.randomUUID(),
+    name: typeof raw.name === 'string' ? raw.name : '',
+    brand:
+      typeof raw.brand === 'string' && BRAND_BY_NAME[raw.brand]
+        ? raw.brand
+        : HYATT_BRANDS[0].name,
+    stayType,
+    tier,
+    roomEntries: stayType === 'EXPLORED' ? normalizeRoomEntries(raw.roomEntries) : [],
+    position: typeof raw.position === 'number' && Number.isInteger(raw.position) ? raw.position : 0,
+    createdAt: typeof raw.createdAt === 'string' ? raw.createdAt : timestamp,
+    updatedAt: typeof raw.updatedAt === 'string' ? raw.updatedAt : timestamp
+  };
+}
+
+function normalizeHotelCollection(hotels: HotelRecord[]) {
+  const normalizedHotels = hotels.map(normalizeHotelRecord);
+  const explored = TIERS.flatMap((tier) =>
+    sortHotelsByTier(
+      normalizedHotels.filter((hotel) => hotel.stayType === 'EXPLORED' && hotel.tier === tier)
+    ).map((hotel, index) => ({
+      ...hotel,
+      tier,
+      position: index
+    }))
+  );
+
+  const future = sortHotelsByTier(
+    normalizedHotels.filter((hotel) => hotel.stayType === 'FUTURE')
+  ).map((hotel, index) => ({
+    ...hotel,
+    tier: null,
+    position: index,
+    roomEntries: []
+  }));
+
+  return sortHotelsByTier([...explored, ...future]);
+}
 
 function createLocalHotel(payload: HotelDraft): HotelRecord {
   const timestamp = new Date().toISOString();
 
-  return {
+  return normalizeHotelRecord({
     id: crypto.randomUUID(),
     ...payload,
-    position: 0,
     createdAt: timestamp,
-    updatedAt: timestamp
-  };
+    updatedAt: timestamp,
+    position: 0
+  });
 }
 
 function moveHotelInCollection(
   hotels: HotelRecord[],
   hotelId: string,
-  tier: Tier,
+  stayType: StayType,
+  tier: Tier | null,
   beforeHotelId: string | null
 ) {
   const draggedHotel = hotels.find((hotel) => hotel.id === hotelId);
@@ -92,58 +189,77 @@ function moveHotelInCollection(
     return hotels;
   }
 
-   if (beforeHotelId === hotelId && draggedHotel.tier === tier) {
+  if (stayType === 'EXPLORED' && !tier) {
+    return hotels;
+  }
+
+  if (stayType === 'FUTURE' && draggedHotel.stayType !== 'FUTURE') {
+    return hotels;
+  }
+
+  const normalizedTier = stayType === 'FUTURE' ? null : tier;
+
+  if (
+    beforeHotelId === hotelId &&
+    draggedHotel.stayType === stayType &&
+    draggedHotel.tier === normalizedTier
+  ) {
     return hotels;
   }
 
   const remainingHotels = hotels.filter((hotel) => hotel.id !== hotelId);
-  const updatedDraggedHotel: HotelRecord = {
-    ...draggedHotel,
-    tier
-  };
-
-  const groupedHotels = TIERS.reduce(
-    (collection, currentTier) => {
-      collection[currentTier] = remainingHotels.filter((hotel) => hotel.tier === currentTier);
-      return collection;
-    },
-    {} as Record<Tier, HotelRecord[]>
+  const targetGroupHotels = remainingHotels.filter(
+    (hotel) => hotel.stayType === stayType && hotel.tier === normalizedTier
+  );
+  const otherHotels = remainingHotels.filter(
+    (hotel) => !(hotel.stayType === stayType && hotel.tier === normalizedTier)
   );
 
-  const nextTierHotels = [...groupedHotels[tier]];
+  const updatedDraggedHotel = normalizeHotelRecord({
+    ...draggedHotel,
+    stayType,
+    tier: normalizedTier,
+    roomEntries: stayType === 'EXPLORED' ? draggedHotel.roomEntries : []
+  });
 
-  if (beforeHotelId) {
-    const insertIndex = nextTierHotels.findIndex((hotel) => hotel.id === beforeHotelId);
-    if (insertIndex >= 0) {
-      nextTierHotels.splice(insertIndex, 0, updatedDraggedHotel);
-    } else {
-      nextTierHotels.push(updatedDraggedHotel);
-    }
+  const nextTargetGroup = [...targetGroupHotels];
+  const insertIndex = beforeHotelId
+    ? nextTargetGroup.findIndex((hotel) => hotel.id === beforeHotelId)
+    : -1;
+
+  if (insertIndex >= 0) {
+    nextTargetGroup.splice(insertIndex, 0, updatedDraggedHotel);
   } else {
-    nextTierHotels.push(updatedDraggedHotel);
+    nextTargetGroup.push(updatedDraggedHotel);
   }
 
-  groupedHotels[tier] = nextTierHotels.map((hotel, index) => ({
-    ...hotel,
-    position: index
-  }));
-
-  return TIERS.flatMap((currentTier) =>
-    (currentTier === tier ? groupedHotels[currentTier] : groupedHotels[currentTier].map((hotel, index) => ({
-      ...hotel,
-      position: index
-    })))
-  );
+  return normalizeHotelCollection([...otherHotels, ...nextTargetGroup]);
 }
 
-function resolveDropTargetFromPointer(event: React.DragEvent<HTMLElement>, tier: Tier): DropTarget {
+function resolveDropTargetFromPointer(
+  event: React.DragEvent<HTMLElement>,
+  stayType: StayType,
+  tier: Tier | null
+): DropTarget {
   const elementUnderPointer = document.elementFromPoint(event.clientX, event.clientY) as HTMLElement | null;
   const hotelCard = elementUnderPointer?.closest<HTMLElement>('[data-hotel-id]');
 
   return {
+    stayType,
     tier,
     beforeHotelId: hotelCard?.dataset.hotelId || null
   };
+}
+
+function countUniqueBrands(hotels: HotelRecord[]) {
+  return new Set(hotels.map((hotel) => hotel.brand)).size;
+}
+
+function countSuites(hotels: HotelRecord[]) {
+  return hotels.reduce(
+    (total, hotel) => total + hotel.roomEntries.filter((entry) => entry.kind === 'SUITE').length,
+    0
+  );
 }
 
 export function HyattTierListClient({
@@ -153,7 +269,7 @@ export function HyattTierListClient({
   initialHotels: HotelRecord[];
   persistenceMode: PersistenceMode;
 }) {
-  const [hotels, setHotels] = useState(() => sortHotelsByTier(initialHotels));
+  const [hotels, setHotels] = useState(() => normalizeHotelCollection(initialHotels));
   const [modalState, setModalState] = useState<ModalState>(null);
   const [draft, setDraft] = useState<HotelDraft>(DEFAULT_DRAFT);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -163,6 +279,7 @@ export function HyattTierListClient({
   const [dropTarget, setDropTarget] = useState<DropTargetState>(null);
   const [recentlyDraggedHotelId, setRecentlyDraggedHotelId] = useState<string | null>(null);
   const [isBrandPaletteOpen, setIsBrandPaletteOpen] = useState(false);
+  const [summaryTab, setSummaryTab] = useState<StayType>('EXPLORED');
 
   useEffect(() => {
     setIsHydrated(true);
@@ -178,8 +295,8 @@ export function HyattTierListClient({
     }
 
     try {
-      const parsedHotels = JSON.parse(storedHotels) as HotelRecord[];
-      setHotels(sortHotelsByTier(parsedHotels));
+      const parsedHotels = JSON.parse(storedHotels) as unknown[];
+      setHotels(normalizeHotelCollection(parsedHotels.map(normalizeHotelRecord)));
     } catch {
       window.localStorage.removeItem(LOCAL_STORAGE_KEY);
     }
@@ -193,21 +310,48 @@ export function HyattTierListClient({
     window.localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(hotels));
   }, [hotels, isHydrated, persistenceMode]);
 
+  const exploredHotels = useMemo(
+    () => sortHotelsByTier(hotels.filter((hotel) => hotel.stayType === 'EXPLORED')),
+    [hotels]
+  );
+  const futureHotels = useMemo(
+    () => sortHotelsByTier(hotels.filter((hotel) => hotel.stayType === 'FUTURE')),
+    [hotels]
+  );
+
   const hotelsByTier = useMemo(() => {
     return TIERS.reduce(
       (collection, tier) => {
-        collection[tier] = sortHotelsByTier(hotels.filter((hotel) => hotel.tier === tier));
+        collection[tier] = exploredHotels.filter((hotel) => hotel.tier === tier);
         return collection;
       },
       {} as Record<Tier, HotelRecord[]>
     );
-  }, [hotels]);
+  }, [exploredHotels]);
 
-  const rankedBrands = useMemo(() => new Set(hotels.map((hotel) => hotel.brand)).size, [hotels]);
+  const exploredBrandCount = useMemo(() => countUniqueBrands(exploredHotels), [exploredHotels]);
+  const futureBrandCount = useMemo(() => countUniqueBrands(futureHotels), [futureHotels]);
+  const exploredSuiteCount = useMemo(() => countSuites(exploredHotels), [exploredHotels]);
   const mappedBrands = useMemo(
-    () => HYATT_BRANDS.filter((brand) => hotels.some((hotel) => hotel.brand === brand.name)),
-    [hotels]
+    () => HYATT_BRANDS.filter((brand) => exploredHotels.some((hotel) => hotel.brand === brand.name)),
+    [exploredHotels]
   );
+  const draggedHotel = useMemo(
+    () => hotels.find((hotel) => hotel.id === draggedHotelId) ?? null,
+    [draggedHotelId, hotels]
+  );
+
+  const summaryCards =
+    summaryTab === 'EXPLORED'
+      ? [
+          { label: 'Hotel Explored', value: exploredHotels.length },
+          { label: 'Brand Explored', value: `${exploredBrandCount}/${HYATT_BRANDS.length}` },
+          { label: 'Suite Explored', value: exploredSuiteCount }
+        ]
+      : [
+          { label: 'Future Hotel Stays (2026 & 2027)', value: futureHotels.length },
+          { label: 'Future Hotel Brands (2026 & 2027)', value: `${futureBrandCount}/${HYATT_BRANDS.length}` }
+        ];
 
   function closeModal() {
     setModalState(null);
@@ -225,7 +369,9 @@ export function HyattTierListClient({
     setDraft({
       name: hotel.name,
       brand: hotel.brand,
-      tier: hotel.tier
+      stayType: hotel.stayType,
+      tier: hotel.tier,
+      roomEntries: hotel.roomEntries.length ? hotel.roomEntries : []
     });
     setErrorMessage(null);
     setModalState({ mode: 'edit', hotelId: hotel.id });
@@ -238,16 +384,7 @@ export function HyattTierListClient({
 
   async function persistDelete(hotelId: string) {
     if (persistenceMode === 'local') {
-      setHotels((currentHotels) =>
-        sortHotelsByTier(
-          currentHotels
-            .filter((hotel) => hotel.id !== hotelId)
-            .map((hotel, index, collection) => ({
-              ...hotel,
-              position: collection.filter((candidate) => candidate.tier === hotel.tier).findIndex((candidate) => candidate.id === hotel.id)
-            }))
-        )
-      );
+      setHotels((currentHotels) => normalizeHotelCollection(currentHotels.filter((hotel) => hotel.id !== hotelId)));
       return;
     }
 
@@ -280,7 +417,7 @@ export function HyattTierListClient({
       throw new Error(result.message || 'Unable to save hotel.');
     }
 
-    return result.hotel;
+    return normalizeHotelRecord(result.hotel);
   }
 
   async function persistUpdate(hotelId: string, payload: HotelDraft) {
@@ -291,11 +428,11 @@ export function HyattTierListClient({
         throw new Error('Hotel could not be found.');
       }
 
-      return {
+      return normalizeHotelRecord({
         ...existingHotel,
         ...payload,
         updatedAt: new Date().toISOString()
-      };
+      });
     }
 
     const response = await fetch(`/api/hotels/${hotelId}`, {
@@ -312,11 +449,11 @@ export function HyattTierListClient({
       throw new Error(result.message || 'Unable to update hotel.');
     }
 
-    return result.hotel;
+    return normalizeHotelRecord(result.hotel);
   }
 
   async function persistHotelOrder(nextHotels: HotelRecord[]) {
-    const orderedHotels = sortHotelsByTier(nextHotels);
+    const orderedHotels = normalizeHotelCollection(nextHotels);
 
     if (persistenceMode === 'local') {
       setHotels(orderedHotels);
@@ -336,6 +473,7 @@ export function HyattTierListClient({
         body: JSON.stringify({
           hotels: orderedHotels.map((hotel) => ({
             id: hotel.id,
+            stayType: hotel.stayType,
             tier: hotel.tier,
             position: hotel.position
           }))
@@ -348,7 +486,7 @@ export function HyattTierListClient({
         throw new Error(result.message || 'Unable to reorder hotels.');
       }
 
-      setHotels(sortHotelsByTier(result.hotels));
+      setHotels(normalizeHotelCollection(result.hotels.map(normalizeHotelRecord)));
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : 'Unable to reorder hotels.');
     } finally {
@@ -357,12 +495,12 @@ export function HyattTierListClient({
     }
   }
 
-  async function handleDropOnTarget(tier: Tier, beforeHotelId: string | null) {
+  async function handleDropOnTarget(stayType: StayType, tier: Tier | null, beforeHotelId: string | null) {
     if (!draggedHotelId) {
       return;
     }
 
-    const nextHotels = moveHotelInCollection(hotels, draggedHotelId, tier, beforeHotelId);
+    const nextHotels = moveHotelInCollection(hotels, draggedHotelId, stayType, tier, beforeHotelId);
     await persistHotelOrder(nextHotels);
   }
 
@@ -379,7 +517,7 @@ export function HyattTierListClient({
 
       if (persistenceMode !== 'local') {
         startTransition(() => {
-          setHotels((currentHotels) => currentHotels.filter((hotel) => hotel.id !== modalState.hotelId));
+          setHotels((currentHotels) => normalizeHotelCollection(currentHotels.filter((hotel) => hotel.id !== modalState.hotelId)));
         });
       }
 
@@ -391,30 +529,47 @@ export function HyattTierListClient({
     }
   }
 
+  function buildPayloadFromDraft(): HotelDraft {
+    const cleanedRoomEntries = draft.roomEntries
+      .map((entry) => ({
+        label: entry.label.trim(),
+        kind: entry.kind
+      }))
+      .filter((entry) => entry.label.length > 0);
+
+    return {
+      name: draft.name.trim(),
+      brand: draft.brand,
+      stayType: draft.stayType,
+      tier: draft.stayType === 'EXPLORED' ? draft.tier ?? 'S' : null,
+      roomEntries: draft.stayType === 'EXPLORED' ? cleanedRoomEntries : []
+    };
+  }
+
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
-    const hotelName = draft.name.trim();
+    const payload = buildPayloadFromDraft();
 
-    if (!hotelName) {
+    if (!payload.name) {
       setErrorMessage('Hotel name is required.');
+      return;
+    }
+
+    if (payload.stayType === 'EXPLORED' && !payload.tier) {
+      setErrorMessage('Select a tier.');
       return;
     }
 
     setIsSaving(true);
     setErrorMessage(null);
 
-    const payload: HotelDraft = {
-      ...draft,
-      name: hotelName
-    };
-
     try {
       if (modalState?.mode === 'edit') {
         const updatedHotel = await persistUpdate(modalState.hotelId, payload);
         startTransition(() => {
           setHotels((currentHotels) =>
-            sortHotelsByTier(
+            normalizeHotelCollection(
               currentHotels.map((hotel) => (hotel.id === updatedHotel.id ? updatedHotel : hotel))
             )
           );
@@ -422,7 +577,7 @@ export function HyattTierListClient({
       } else {
         const createdHotel = await persistCreate(payload);
         startTransition(() => {
-          setHotels((currentHotels) => sortHotelsByTier([...currentHotels, createdHotel]));
+          setHotels((currentHotels) => normalizeHotelCollection([...currentHotels, createdHotel]));
         });
       }
 
@@ -443,58 +598,90 @@ export function HyattTierListClient({
     openEditModal(hotel);
   }
 
+  function updateRoomEntry(index: number, updater: (entry: RoomEntry) => RoomEntry) {
+    setDraft((current) => ({
+      ...current,
+      roomEntries: current.roomEntries.map((entry, entryIndex) =>
+        entryIndex === index ? updater(entry) : entry
+      )
+    }));
+  }
+
+  function addRoomEntry() {
+    setDraft((current) => ({
+      ...current,
+      roomEntries: [...current.roomEntries, { ...EMPTY_ROOM_ENTRY }]
+    }));
+  }
+
+  function removeRoomEntry(index: number) {
+    setDraft((current) => ({
+      ...current,
+      roomEntries: current.roomEntries.filter((_, entryIndex) => entryIndex !== index)
+    }));
+  }
+
   return (
     <main className="relative overflow-hidden px-3 py-4 sm:px-5 lg:px-6">
       <div className="pointer-events-none absolute inset-x-0 top-0 h-[34rem] bg-[radial-gradient(circle_at_top_left,rgba(179,141,78,0.2),transparent_34%),radial-gradient(circle_at_top_right,rgba(0,102,179,0.18),transparent_32%)]" />
 
-      <div className="relative mx-auto flex max-w-[1500px] flex-col gap-4 pb-6">
-        <section className="glass-panel relative overflow-hidden rounded-[30px] px-5 py-5 sm:px-7 sm:py-6 lg:px-8">
-          <div className="relative">
-            <div className="flex flex-col gap-6">
-              <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-                <div>
-                  <p className="section-label">World of Hyatt</p>
-                  <h1 className="mt-3 max-w-3xl font-[family:var(--font-display)] text-3xl leading-none text-[rgb(var(--page-foreground))] sm:text-4xl lg:text-5xl">
-                    My Hyatt Tier List
-                  </h1>
-                </div>
-
-                <div className="flex flex-col gap-3 sm:flex-row sm:items-center lg:justify-end">
-                  <button
-                    type="button"
-                    onClick={() => setIsBrandPaletteOpen(true)}
-                    className="inline-flex items-center justify-center rounded-full border border-[rgba(0,102,179,0.18)] bg-white/82 px-5 py-3 text-sm font-semibold text-[rgb(var(--wine))] shadow-[0_12px_24px_rgba(26,74,122,0.08)] transition hover:-translate-y-0.5 hover:bg-[rgba(0,102,179,0.06)]"
-                    aria-label="Open brand palette"
-                  >
-                    Brands
-                  </button>
-                  <button
-                    type="button"
-                    onClick={openCreateModal}
-                    className="inline-flex items-center justify-center rounded-full bg-[rgb(var(--wine))] px-6 py-3 text-sm font-semibold text-white shadow-[0_18px_40px_rgba(26,74,122,0.22)] transition hover:-translate-y-0.5 hover:bg-[#004f8d]"
-                  >
-                    Add hotel
-                  </button>
-                </div>
+      <div className="relative mx-auto flex max-w-[1500px] flex-col gap-4 pb-8">
+        <section className="glass-panel relative overflow-hidden rounded-[30px] px-4 py-5 sm:px-6 sm:py-6 lg:px-8">
+          <div className="flex flex-col gap-5">
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+              <div>
+                <p className="section-label">World of Hyatt</p>
+                <h1 className="mt-3 max-w-3xl font-[family:var(--font-display)] text-3xl leading-none text-[rgb(var(--page-foreground))] sm:text-4xl lg:text-5xl">
+                  My Hyatt Tier List
+                </h1>
               </div>
 
-              <div className="grid gap-3 sm:grid-cols-2">
-                <div className="soft-ring rounded-[24px] bg-white/82 p-4">
-                  <div className="text-xs uppercase tracking-[0.18em] text-[rgba(34,58,86,0.52)]">
-                    Hotel Explored
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center lg:justify-end">
+                <button
+                  type="button"
+                  onClick={() => setIsBrandPaletteOpen(true)}
+                  className="inline-flex items-center justify-center rounded-full border border-[rgba(0,102,179,0.18)] bg-white/82 px-5 py-3 text-sm font-semibold text-[rgb(var(--wine))] shadow-[0_12px_24px_rgba(26,74,122,0.08)] transition hover:-translate-y-0.5 hover:bg-[rgba(0,102,179,0.06)]"
+                  aria-label="Open brand palette"
+                >
+                  Brands
+                </button>
+                <button
+                  type="button"
+                  onClick={openCreateModal}
+                  className="inline-flex items-center justify-center rounded-full bg-[rgb(var(--wine))] px-6 py-3 text-sm font-semibold text-white shadow-[0_18px_40px_rgba(26,74,122,0.22)] transition hover:-translate-y-0.5 hover:bg-[#004f8d]"
+                >
+                  Add hotel
+                </button>
+              </div>
+            </div>
+
+            <div className="flex flex-col gap-3">
+              <div className="flex flex-wrap gap-2" role="tablist" aria-label="Stay summary tabs">
+                {SUMMARY_TABS.map((tab) => (
+                  <button
+                    key={tab.id}
+                    type="button"
+                    role="tab"
+                    aria-selected={summaryTab === tab.id}
+                    onClick={() => setSummaryTab(tab.id)}
+                    className={`rounded-full px-4 py-2 text-sm font-semibold transition ${summaryTab === tab.id ? 'bg-[rgb(var(--wine))] text-white shadow-[0_12px_28px_rgba(26,74,122,0.16)]' : 'border border-[rgba(0,102,179,0.16)] bg-white/82 text-[rgb(var(--page-foreground))] hover:bg-[rgba(0,102,179,0.06)]'}`}
+                  >
+                    {tab.label}
+                  </button>
+                ))}
+              </div>
+
+              <div className={`grid gap-3 ${summaryTab === 'EXPLORED' ? 'sm:grid-cols-2 lg:grid-cols-3' : 'sm:grid-cols-2'}`}>
+                {summaryCards.map((card) => (
+                  <div key={card.label} className="soft-ring rounded-[24px] bg-white/82 p-4">
+                    <div className="text-[0.72rem] uppercase tracking-[0.16em] text-[rgba(34,58,86,0.52)]">
+                      {card.label}
+                    </div>
+                    <div className="mt-2 text-2xl font-semibold text-[rgb(var(--page-foreground))] sm:text-[1.75rem]">
+                      {card.value}
+                    </div>
                   </div>
-                  <div className="mt-2 text-2xl font-semibold text-[rgb(var(--page-foreground))] sm:text-[1.75rem]">
-                    {hotels.length}
-                  </div>
-                </div>
-                <div className="soft-ring rounded-[24px] bg-white/82 p-4">
-                  <div className="text-xs uppercase tracking-[0.18em] text-[rgba(34,58,86,0.52)]">
-                    Brands Explored
-                  </div>
-                  <div className="mt-2 text-2xl font-semibold text-[rgb(var(--page-foreground))] sm:text-[1.75rem]">
-                    {rankedBrands}/{HYATT_BRANDS.length}
-                  </div>
-                </div>
+                ))}
               </div>
             </div>
           </div>
@@ -518,16 +705,19 @@ export function HyattTierListClient({
                       }
 
                       event.preventDefault();
-                      setDropTarget(resolveDropTargetFromPointer(event, tier));
+                      setDropTarget(resolveDropTargetFromPointer(event, 'EXPLORED', tier));
                     }}
                     onDrop={(event) => {
                       event.preventDefault();
-                      const target = resolveDropTargetFromPointer(event, tier);
-                      void handleDropOnTarget(target.tier, target.beforeHotelId);
+                      const target = resolveDropTargetFromPointer(event, 'EXPLORED', tier);
+                      void handleDropOnTarget(target.stayType, target.tier, target.beforeHotelId);
                     }}
                     className={`tier-shell rounded-[24px] bg-gradient-to-r ${tierStyle.panel} p-3.5 sm:p-4`}
                     style={{
-                      outline: dropTarget?.tier === tier ? '2px solid rgba(0,102,179,0.18)' : 'none',
+                      outline:
+                        dropTarget?.stayType === 'EXPLORED' && dropTarget.tier === tier
+                          ? '2px solid rgba(0,102,179,0.18)'
+                          : 'none',
                       outlineOffset: '3px'
                     }}
                   >
@@ -536,10 +726,8 @@ export function HyattTierListClient({
                         <div className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl text-lg font-bold ${tierStyle.badge}`}>
                           {tier}
                         </div>
-                        <div>
-                          <div className="text-lg font-semibold text-[rgb(var(--page-foreground))]">
-                            {tier}-Tier
-                          </div>
+                        <div className="text-lg font-semibold text-[rgb(var(--page-foreground))]">
+                          {tier}-Tier
                         </div>
                       </div>
 
@@ -555,8 +743,7 @@ export function HyattTierListClient({
                         </div>
                       ) : (
                         tierHotels.map((hotel) => {
-                          const brand = BRAND_BY_NAME[hotel.brand];
-                          const brandColor = brand?.color || '#7A1F2C';
+                          const brandColor = BRAND_BY_NAME[hotel.brand]?.color || '#7A1F2C';
 
                           return (
                             <div
@@ -565,7 +752,7 @@ export function HyattTierListClient({
                               draggable
                               onDragStart={(event) => {
                                 setDraggedHotelId(hotel.id);
-                                setDropTarget({ tier: hotel.tier, beforeHotelId: hotel.id });
+                                setDropTarget({ stayType: 'EXPLORED', tier: hotel.tier, beforeHotelId: hotel.id });
                                 setRecentlyDraggedHotelId(hotel.id);
                                 event.dataTransfer.effectAllowed = 'move';
                                 event.dataTransfer.setData('text/plain', hotel.id);
@@ -589,7 +776,9 @@ export function HyattTierListClient({
                               className="group rounded-[18px] border bg-white/82 p-3 text-left transition hover:-translate-y-0.5 hover:shadow-[0_14px_26px_rgba(26,74,122,0.11)]"
                               style={{
                                 borderColor:
-                                  dropTarget?.tier === tier && dropTarget.beforeHotelId === hotel.id
+                                  dropTarget?.stayType === 'EXPLORED' &&
+                                  dropTarget.tier === tier &&
+                                  dropTarget.beforeHotelId === hotel.id
                                     ? `${brandColor}66`
                                     : `${brandColor}28`,
                                 boxShadow: `inset 0 1px 0 rgba(255,255,255,0.8), 0 14px 30px ${brandColor}10`,
@@ -598,14 +787,18 @@ export function HyattTierListClient({
                               }}
                             >
                               <div className="flex items-start justify-between gap-3">
-                                <div className="line-clamp-2 text-base font-semibold leading-5 text-[rgb(var(--page-foreground))] transition group-hover:text-[rgb(var(--wine))]">
-                                  {hotel.name}
+                                <div>
+                                  <div className="line-clamp-2 text-base font-semibold leading-5 text-[rgb(var(--page-foreground))] transition group-hover:text-[rgb(var(--wine))]">
+                                    {hotel.name}
+                                  </div>
+                                  {hotel.roomEntries.length ? (
+                                    <div className="mt-2 text-xs text-[rgba(34,58,86,0.58)]">
+                                      {hotel.roomEntries.length} room type{hotel.roomEntries.length === 1 ? '' : 's'} logged
+                                    </div>
+                                  ) : null}
                                 </div>
 
-                                <span
-                                  className="mt-1 h-3 w-3 shrink-0 rounded-full"
-                                  style={{ backgroundColor: brandColor }}
-                                />
+                                <span className="mt-1 h-3 w-3 shrink-0 rounded-full" style={{ backgroundColor: brandColor }} />
                               </div>
                             </div>
                           );
@@ -631,31 +824,128 @@ export function HyattTierListClient({
                         color: brand.color
                       }}
                     >
-                      <span
-                        className="h-2.5 w-2.5 rounded-full"
-                        style={{ backgroundColor: brand.color }}
-                      />
+                      <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: brand.color }} />
                       {brand.name}
                     </div>
                   ))
                 ) : (
                   <div className="rounded-[18px] border border-dashed border-[rgba(0,102,179,0.16)] bg-white/55 p-4 text-sm text-[rgba(34,58,86,0.58)]">
-                    No mapped brands yet.
+                    No explored brands yet.
                   </div>
                 )}
               </div>
             </aside>
           </div>
         </section>
+
+        <section className="glass-panel rounded-[28px] px-4 py-4 sm:px-5 sm:py-5">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <p className="section-label">Future Stays</p>
+              <div className="mt-2 text-xl font-semibold text-[rgb(var(--page-foreground))] font-[family:var(--font-display)]">
+                Future Stays
+              </div>
+            </div>
+            <div className="rounded-full border border-white/80 bg-white/75 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-[rgba(34,58,86,0.58)]">
+              {futureHotels.length} future hotel{futureHotels.length === 1 ? '' : 's'}
+            </div>
+          </div>
+
+          <div
+            className="mt-4 rounded-[24px] border border-dashed border-[rgba(0,102,179,0.14)] bg-white/40 p-3 sm:p-4"
+            onDragOver={(event) => {
+              if (!draggedHotel || draggedHotel.stayType !== 'FUTURE') {
+                return;
+              }
+
+              event.preventDefault();
+              setDropTarget(resolveDropTargetFromPointer(event, 'FUTURE', null));
+            }}
+            onDrop={(event) => {
+              if (!draggedHotel || draggedHotel.stayType !== 'FUTURE') {
+                return;
+              }
+
+              event.preventDefault();
+              const target = resolveDropTargetFromPointer(event, 'FUTURE', null);
+              void handleDropOnTarget(target.stayType, target.tier, target.beforeHotelId);
+            }}
+            style={{
+              outline: dropTarget?.stayType === 'FUTURE' ? '2px solid rgba(0,102,179,0.18)' : 'none',
+              outlineOffset: '3px'
+            }}
+          >
+            <div className="grid gap-2.5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+              {futureHotels.length ? (
+                futureHotels.map((hotel) => {
+                  const brandColor = BRAND_BY_NAME[hotel.brand]?.color || '#7A1F2C';
+
+                  return (
+                    <div
+                      key={hotel.id}
+                      data-hotel-id={hotel.id}
+                      draggable
+                      onDragStart={(event) => {
+                        setDraggedHotelId(hotel.id);
+                        setDropTarget({ stayType: 'FUTURE', tier: null, beforeHotelId: hotel.id });
+                        setRecentlyDraggedHotelId(hotel.id);
+                        event.dataTransfer.effectAllowed = 'move';
+                        event.dataTransfer.setData('text/plain', hotel.id);
+                      }}
+                      onDragEnd={() => {
+                        window.setTimeout(() => {
+                          setRecentlyDraggedHotelId(null);
+                        }, 0);
+                        resetDragState();
+                      }}
+                      onClick={() => handleHotelClick(hotel)}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter' || event.key === ' ') {
+                          event.preventDefault();
+                          handleHotelClick(hotel);
+                        }
+                      }}
+                      role="button"
+                      tabIndex={0}
+                      className="group rounded-[18px] border bg-white/84 p-3 text-left transition hover:-translate-y-0.5 hover:shadow-[0_14px_26px_rgba(26,74,122,0.11)]"
+                      style={{
+                        borderColor: dropTarget?.stayType === 'FUTURE' && dropTarget.beforeHotelId === hotel.id ? `${brandColor}66` : `${brandColor}28`,
+                        boxShadow: `inset 0 1px 0 rgba(255,255,255,0.8), 0 14px 30px ${brandColor}10`,
+                        opacity: draggedHotelId === hotel.id ? 0.55 : 1,
+                        cursor: draggedHotelId === hotel.id ? 'grabbing' : 'grab'
+                      }}
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <div className="line-clamp-2 text-base font-semibold leading-5 text-[rgb(var(--page-foreground))] transition group-hover:text-[rgb(var(--wine))]">
+                            {hotel.name}
+                          </div>
+                          <div className="mt-2 text-xs text-[rgba(34,58,86,0.58)]">
+                            Drag into a tier when explored.
+                          </div>
+                        </div>
+                        <span className="mt-1 h-3 w-3 shrink-0 rounded-full" style={{ backgroundColor: brandColor }} />
+                      </div>
+                    </div>
+                  );
+                })
+              ) : (
+                <div className="rounded-[18px] border border-dashed border-[rgba(0,102,179,0.16)] bg-white/55 p-4 text-sm text-[rgba(34,58,86,0.58)]">
+                  No future stays yet.
+                </div>
+              )}
+            </div>
+          </div>
+        </section>
       </div>
 
       {isBrandPaletteOpen ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-[rgba(42,18,22,0.48)] px-4 py-8 backdrop-blur-sm">
-          <div className="glass-panel w-full max-w-4xl rounded-[30px] p-6 sm:p-7">
+          <div className="glass-panel w-full max-w-4xl rounded-[30px] p-5 sm:p-7">
             <div className="flex items-start justify-between gap-4">
               <div>
                 <p className="section-label">Brand Palette</p>
-                <h2 className="mt-2 text-4xl font-semibold leading-none text-[rgb(var(--page-foreground))] font-[family:var(--font-display)]">
+                <h2 className="mt-2 text-3xl font-semibold leading-none text-[rgb(var(--page-foreground))] font-[family:var(--font-display)] sm:text-4xl">
                   Hyatt brands and colors
                 </h2>
               </div>
@@ -701,13 +991,18 @@ export function HyattTierListClient({
       ) : null}
 
       {modalState ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-[rgba(42,18,22,0.48)] px-4 py-8 backdrop-blur-sm">
-          <div className="glass-panel w-full max-w-xl rounded-[30px] p-6 sm:p-7">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-[rgba(42,18,22,0.48)] px-3 py-4 backdrop-blur-sm sm:px-4 sm:py-8">
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label={modalState.mode === 'edit' ? 'Edit hotel stay' : 'Add hotel stay'}
+            className="glass-panel w-full max-w-2xl max-h-[calc(100vh-2rem)] overflow-y-auto rounded-[30px] p-5 sm:p-7"
+          >
             <div className="flex items-start justify-between gap-4">
               <div>
                 <p className="section-label">{modalState.mode === 'edit' ? 'Edit Hotel' : 'Add Hotel'}</p>
-                <h2 className="mt-2 text-4xl font-semibold leading-none text-[rgb(var(--page-foreground))] font-[family:var(--font-display)]">
-                  {modalState.mode === 'edit' ? 'Update this ranking' : 'Add a Hyatt hotel'}
+                <h2 className="mt-2 text-3xl font-semibold leading-none text-[rgb(var(--page-foreground))] font-[family:var(--font-display)] sm:text-4xl">
+                  {modalState.mode === 'edit' ? 'Update this stay' : 'Add a Hyatt stay'}
                 </h2>
               </div>
 
@@ -721,18 +1016,17 @@ export function HyattTierListClient({
               </button>
             </div>
 
-            <form className="mt-6 space-y-4" onSubmit={handleSubmit}>
-              <label className="block space-y-2">
-                <span className="text-sm font-semibold text-[rgb(var(--page-foreground))]">Hotel name</span>
-                <input
-                  value={draft.name}
-                  onChange={(event) => setDraft((current) => ({ ...current, name: event.target.value }))}
-                  placeholder=""
-                  className="w-full rounded-[18px] border border-[rgba(118,31,47,0.14)] bg-white/88 px-4 py-3 text-sm text-[rgb(var(--page-foreground))] outline-none transition placeholder:text-[rgba(64,35,37,0.42)] focus:border-[rgba(118,31,47,0.32)] focus:ring-4 focus:ring-[rgba(118,31,47,0.08)]"
-                />
-              </label>
+            <form className="mt-6 space-y-5" onSubmit={handleSubmit}>
+              <div className="grid gap-4 md:grid-cols-2">
+                <label className="block space-y-2 md:col-span-2">
+                  <span className="text-sm font-semibold text-[rgb(var(--page-foreground))]">Hotel name</span>
+                  <input
+                    value={draft.name}
+                    onChange={(event) => setDraft((current) => ({ ...current, name: event.target.value }))}
+                    className="w-full rounded-[18px] border border-[rgba(118,31,47,0.14)] bg-white/88 px-4 py-3 text-sm text-[rgb(var(--page-foreground))] outline-none transition focus:border-[rgba(118,31,47,0.32)] focus:ring-4 focus:ring-[rgba(118,31,47,0.08)]"
+                  />
+                </label>
 
-              <div className="grid gap-4 sm:grid-cols-2">
                 <label className="block space-y-2">
                   <span className="text-sm font-semibold text-[rgb(var(--page-foreground))]">Brand</span>
                   <FancySelect
@@ -750,16 +1044,101 @@ export function HyattTierListClient({
                 </label>
 
                 <label className="block space-y-2">
-                  <span className="text-sm font-semibold text-[rgb(var(--page-foreground))]">Tier</span>
+                  <span className="text-sm font-semibold text-[rgb(var(--page-foreground))]">Stay type</span>
                   <FancySelect
-                    value={draft.tier}
-                    onChange={(value) => setDraft((current) => ({ ...current, tier: value as Tier }))}
-                    options={TIERS.map((tier) => ({
-                      value: tier,
-                      label: `${tier}-Tier`
-                    }))}
+                    value={draft.stayType}
+                    onChange={(value) =>
+                      setDraft((current) => ({
+                        ...current,
+                        stayType: value as StayType,
+                        tier: value === 'EXPLORED' ? current.tier ?? 'S' : null,
+                        roomEntries: value === 'EXPLORED' ? current.roomEntries : []
+                      }))
+                    }
+                    options={STAY_TYPE_OPTIONS}
                   />
                 </label>
+
+                {draft.stayType === 'EXPLORED' ? (
+                  <>
+                    <label className="block space-y-2 md:col-span-2 lg:col-span-1">
+                      <span className="text-sm font-semibold text-[rgb(var(--page-foreground))]">Tier</span>
+                      <FancySelect
+                        value={draft.tier ?? 'S'}
+                        onChange={(value) => setDraft((current) => ({ ...current, tier: value as Tier }))}
+                        options={TIERS.map((tier) => ({
+                          value: tier,
+                          label: `${tier}-Tier`
+                        }))}
+                      />
+                    </label>
+
+                    <div className="space-y-3 md:col-span-2">
+                      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                        <div>
+                          <div className="text-sm font-semibold text-[rgb(var(--page-foreground))]">Room Type</div>
+                          <div className="mt-1 text-xs text-[rgba(34,58,86,0.58)]">
+                            Add each room or suite you stayed in for this hotel.
+                          </div>
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={addRoomEntry}
+                          className="inline-flex items-center justify-center rounded-full border border-[rgba(0,102,179,0.16)] bg-white/82 px-4 py-2 text-sm font-semibold text-[rgb(var(--wine))] transition hover:bg-[rgba(0,102,179,0.06)]"
+                        >
+                          Add room type
+                        </button>
+                      </div>
+
+                      {draft.roomEntries.length ? (
+                        <div className="space-y-3">
+                          {draft.roomEntries.map((entry, index) => (
+                            <div
+                              key={`${index}-${entry.kind}`}
+                              className="grid gap-3 rounded-[20px] border border-[rgba(0,102,179,0.1)] bg-white/72 p-3 md:grid-cols-[minmax(0,1fr)_10rem_auto]"
+                            >
+                              <input
+                                value={entry.label}
+                                onChange={(event) =>
+                                  updateRoomEntry(index, (current) => ({
+                                    ...current,
+                                    label: event.target.value
+                                  }))
+                                }
+                                placeholder="Standard"
+                                className="w-full rounded-[16px] border border-[rgba(118,31,47,0.14)] bg-white/92 px-4 py-3 text-sm text-[rgb(var(--page-foreground))] outline-none transition focus:border-[rgba(118,31,47,0.32)] focus:ring-4 focus:ring-[rgba(118,31,47,0.08)]"
+                              />
+
+                              <FancySelect
+                                value={entry.kind}
+                                onChange={(value) =>
+                                  updateRoomEntry(index, (current) => ({
+                                    ...current,
+                                    kind: value as RoomEntryKind
+                                  }))
+                                }
+                                options={ROOM_KIND_OPTIONS}
+                              />
+
+                              <button
+                                type="button"
+                                onClick={() => removeRoomEntry(index)}
+                                className="inline-flex items-center justify-center rounded-full border border-[rgba(163,33,48,0.18)] bg-[rgba(163,33,48,0.08)] px-4 py-2 text-sm font-semibold text-[#a32130] transition hover:bg-[rgba(163,33,48,0.12)]"
+                              >
+                                Remove
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="rounded-[18px] border border-dashed border-[rgba(0,102,179,0.16)] bg-white/55 p-4 text-sm text-[rgba(34,58,86,0.58)]">
+                          No room types added yet.
+                        </div>
+                      )}
+                    </div>
+                  </>
+                ) : null}
               </div>
 
               {errorMessage ? (
@@ -781,6 +1160,7 @@ export function HyattTierListClient({
                     </button>
                   ) : null}
                 </div>
+
                 <div className="flex flex-col gap-3 sm:flex-row">
                   <button
                     type="button"
@@ -792,7 +1172,7 @@ export function HyattTierListClient({
                   <button
                     type="submit"
                     disabled={isSaving}
-                    className="rounded-full bg-[rgb(var(--wine))] px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-[#641826] disabled:cursor-not-allowed disabled:opacity-70"
+                    className="rounded-full bg-[rgb(var(--wine))] px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-[#004f8d] disabled:cursor-not-allowed disabled:opacity-70"
                   >
                     {isSaving
                       ? 'Saving...'
