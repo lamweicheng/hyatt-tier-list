@@ -28,11 +28,6 @@ const EMPTY_ROOM_ENTRY: RoomEntry = {
   kind: 'ROOM'
 };
 
-const SUMMARY_TABS: Array<{ id: StayType; label: string }> = [
-  { id: 'EXPLORED', label: 'Explored' },
-  { id: 'FUTURE', label: 'Future' }
-];
-
 const ROOM_KIND_OPTIONS: Array<{ value: RoomEntryKind; label: string }> = [
   { value: 'ROOM', label: 'Room' },
   { value: 'SUITE', label: 'Suite' }
@@ -255,6 +250,16 @@ function countUniqueBrands(hotels: HotelRecord[]) {
   return new Set(hotels.map((hotel) => hotel.brand)).size;
 }
 
+function countAdditionalFutureBrands(exploredHotels: HotelRecord[], futureHotels: HotelRecord[]) {
+  const exploredBrands = new Set(exploredHotels.map((hotel) => hotel.brand));
+
+  return new Set(
+    futureHotels
+      .map((hotel) => hotel.brand)
+      .filter((brand) => !exploredBrands.has(brand))
+  ).size;
+}
+
 function countSuites(hotels: HotelRecord[]) {
   return hotels.reduce(
     (total, hotel) => total + hotel.roomEntries.filter((entry) => entry.kind === 'SUITE').length,
@@ -279,7 +284,6 @@ export function HyattTierListClient({
   const [dropTarget, setDropTarget] = useState<DropTargetState>(null);
   const [recentlyDraggedHotelId, setRecentlyDraggedHotelId] = useState<string | null>(null);
   const [isBrandPaletteOpen, setIsBrandPaletteOpen] = useState(false);
-  const [summaryTab, setSummaryTab] = useState<StayType>('EXPLORED');
 
   useEffect(() => {
     setIsHydrated(true);
@@ -330,8 +334,11 @@ export function HyattTierListClient({
   }, [exploredHotels]);
 
   const exploredBrandCount = useMemo(() => countUniqueBrands(exploredHotels), [exploredHotels]);
-  const futureBrandCount = useMemo(() => countUniqueBrands(futureHotels), [futureHotels]);
   const exploredSuiteCount = useMemo(() => countSuites(exploredHotels), [exploredHotels]);
+  const brandsExploringCount = useMemo(
+    () => countAdditionalFutureBrands(exploredHotels, futureHotels),
+    [exploredHotels, futureHotels]
+  );
   const mappedBrands = useMemo(
     () => HYATT_BRANDS.filter((brand) => exploredHotels.some((hotel) => hotel.brand === brand.name)),
     [exploredHotels]
@@ -341,17 +348,16 @@ export function HyattTierListClient({
     [draggedHotelId, hotels]
   );
 
-  const summaryCards =
-    summaryTab === 'EXPLORED'
-      ? [
-          { label: 'Hotel Explored', value: exploredHotels.length },
-          { label: 'Brand Explored', value: `${exploredBrandCount}/${HYATT_BRANDS.length}` },
-          { label: 'Suite Explored', value: exploredSuiteCount }
-        ]
-      : [
-          { label: 'Future Hotel Stays (2026 & 2027)', value: futureHotels.length },
-          { label: 'Future Hotel Brands (2026 & 2027)', value: `${futureBrandCount}/${HYATT_BRANDS.length}` }
-        ];
+  const summaryCards = [
+    { label: 'Hotel Explored', value: exploredHotels.length },
+    { label: 'Brand Explored', value: `${exploredBrandCount}/${HYATT_BRANDS.length}` },
+    { label: 'Suite Explored', value: exploredSuiteCount },
+    { label: 'Future Hotel Stays (2026 - 2027)', value: futureHotels.length },
+    {
+      label: 'Brands Exploring (2026 - 2027)',
+      value: `${brandsExploringCount}/${Math.max(HYATT_BRANDS.length - exploredBrandCount, 0)}`
+    }
+  ];
 
   function closeModal() {
     setModalState(null);
@@ -655,23 +661,7 @@ export function HyattTierListClient({
               </div>
             </div>
 
-            <div className="flex flex-col gap-3">
-              <div className="flex flex-wrap gap-2" role="tablist" aria-label="Stay summary tabs">
-                {SUMMARY_TABS.map((tab) => (
-                  <button
-                    key={tab.id}
-                    type="button"
-                    role="tab"
-                    aria-selected={summaryTab === tab.id}
-                    onClick={() => setSummaryTab(tab.id)}
-                    className={`rounded-full px-4 py-2 text-sm font-semibold transition ${summaryTab === tab.id ? 'bg-[rgb(var(--wine))] text-white shadow-[0_12px_28px_rgba(26,74,122,0.16)]' : 'border border-[rgba(0,102,179,0.16)] bg-white/82 text-[rgb(var(--page-foreground))] hover:bg-[rgba(0,102,179,0.06)]'}`}
-                  >
-                    {tab.label}
-                  </button>
-                ))}
-              </div>
-
-              <div className={`grid gap-3 ${summaryTab === 'EXPLORED' ? 'sm:grid-cols-2 lg:grid-cols-3' : 'sm:grid-cols-2'}`}>
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
                 {summaryCards.map((card) => (
                   <div key={card.label} className="soft-ring rounded-[24px] bg-white/82 p-4">
                     <div className="text-[0.72rem] uppercase tracking-[0.16em] text-[rgba(34,58,86,0.52)]">
@@ -682,7 +672,6 @@ export function HyattTierListClient({
                     </div>
                   </div>
                 ))}
-              </div>
             </div>
           </div>
         </section>
@@ -791,11 +780,6 @@ export function HyattTierListClient({
                                   <div className="line-clamp-2 text-base font-semibold leading-5 text-[rgb(var(--page-foreground))] transition group-hover:text-[rgb(var(--wine))]">
                                     {hotel.name}
                                   </div>
-                                  {hotel.roomEntries.length ? (
-                                    <div className="mt-2 text-xs text-[rgba(34,58,86,0.58)]">
-                                      {hotel.roomEntries.length} room type{hotel.roomEntries.length === 1 ? '' : 's'} logged
-                                    </div>
-                                  ) : null}
                                 </div>
 
                                 <span className="mt-1 h-3 w-3 shrink-0 rounded-full" style={{ backgroundColor: brandColor }} />

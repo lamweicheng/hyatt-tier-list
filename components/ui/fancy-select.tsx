@@ -34,6 +34,7 @@ export function FancySelect({
   panelClassName = ''
 }: FancySelectProps) {
   const rootRef = useRef<HTMLDivElement | null>(null);
+  const panelContentRef = useRef<HTMLDivElement | null>(null);
   const selectIdRef = useRef(`fancy-select-${Math.random().toString(36).slice(2)}`);
   const [isOpen, setIsOpen] = useState(false);
   const [openAbove, setOpenAbove] = useState(false);
@@ -69,6 +70,10 @@ export function FancySelect({
   }, []);
 
   useEffect(() => {
+    setIsOpen(false);
+  }, [value]);
+
+  useEffect(() => {
     if (!isOpen) {
       return;
     }
@@ -81,11 +86,14 @@ export function FancySelect({
       }
 
       const rect = root.getBoundingClientRect();
+  const panelContent = panelContentRef.current;
       const viewportHeight = window.innerHeight;
       const spaceBelow = viewportHeight - rect.bottom - 16;
       const spaceAbove = rect.top - 16;
       const shouldOpenAbove = spaceBelow < 260 && spaceAbove > spaceBelow;
-      const nextMaxHeight = Math.max(160, Math.min(320, shouldOpenAbove ? spaceAbove - 12 : spaceBelow - 12));
+  const availableHeight = Math.max(96, shouldOpenAbove ? spaceAbove - 12 : spaceBelow - 12);
+  const contentHeight = panelContent?.scrollHeight ?? 288;
+  const nextMaxHeight = Math.min(320, availableHeight, contentHeight);
 
       setOpenAbove(shouldOpenAbove);
       setPanelMaxHeight(nextMaxHeight);
@@ -161,7 +169,7 @@ export function FancySelect({
         <div
           className={`absolute left-0 right-0 z-30 overflow-hidden rounded-[22px] border border-[rgba(118,31,47,0.12)] bg-[rgba(255,250,246,0.98)] p-2 shadow-[0_24px_60px_rgba(81,39,43,0.18)] backdrop-blur-xl ${openAbove ? 'bottom-full mb-2' : 'top-full mt-2'} ${panelClassName}`}
         >
-          <div className="overflow-auto pr-1" style={{ maxHeight: `${panelMaxHeight}px` }}>
+          <div ref={panelContentRef} className="overflow-y-auto overflow-x-hidden" style={{ maxHeight: `${panelMaxHeight}px` }}>
             {normalizedGroups.map((group) => (
               <div key={group.label || 'options'} className="pb-2 last:pb-0">
                 {group.label ? (
