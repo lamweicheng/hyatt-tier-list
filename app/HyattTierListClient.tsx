@@ -25,7 +25,7 @@ const DEFAULT_DRAFT: HotelDraft = {
 
 const EMPTY_ROOM_ENTRY: RoomEntry = {
   label: '',
-  kind: 'ROOM'
+  kind: 'SUITE'
 };
 
 const ROOM_KIND_OPTIONS: Array<{ value: RoomEntryKind; label: string }> = [
@@ -128,7 +128,7 @@ function normalizeHotelRecord(value: unknown): HotelRecord {
         : HYATT_BRANDS[0].name,
     stayType,
     tier,
-    roomEntries: stayType === 'EXPLORED' ? normalizeRoomEntries(raw.roomEntries) : [],
+    roomEntries: normalizeRoomEntries(raw.roomEntries),
     position: typeof raw.position === 'number' && Number.isInteger(raw.position) ? raw.position : 0,
     createdAt: typeof raw.createdAt === 'string' ? raw.createdAt : timestamp,
     updatedAt: typeof raw.updatedAt === 'string' ? raw.updatedAt : timestamp
@@ -153,7 +153,7 @@ function normalizeHotelCollection(hotels: HotelRecord[]) {
     ...hotel,
     tier: null,
     position: index,
-    roomEntries: []
+    roomEntries: hotel.roomEntries
   }));
 
   return sortHotelsByTier([...explored, ...future]);
@@ -214,7 +214,7 @@ function moveHotelInCollection(
     ...draggedHotel,
     stayType,
     tier: normalizedTier,
-    roomEntries: stayType === 'EXPLORED' ? draggedHotel.roomEntries : []
+    roomEntries: draggedHotel.roomEntries
   });
 
   const nextTargetGroup = [...targetGroupHotels];
@@ -267,6 +267,10 @@ function countSuites(hotels: HotelRecord[]) {
   );
 }
 
+function formatRoomEntries(entries: RoomEntry[]) {
+  return entries.map((entry) => entry.label).join(', ');
+}
+
 export function HyattTierListClient({
   initialHotels,
   persistenceMode
@@ -284,6 +288,7 @@ export function HyattTierListClient({
   const [dropTarget, setDropTarget] = useState<DropTargetState>(null);
   const [recentlyDraggedHotelId, setRecentlyDraggedHotelId] = useState<string | null>(null);
   const [isBrandPaletteOpen, setIsBrandPaletteOpen] = useState(false);
+  const [selectedBrandName, setSelectedBrandName] = useState<string | null>(null);
 
   useEffect(() => {
     setIsHydrated(true);
@@ -343,19 +348,27 @@ export function HyattTierListClient({
     () => HYATT_BRANDS.filter((brand) => exploredHotels.some((hotel) => hotel.brand === brand.name)),
     [exploredHotels]
   );
+  const selectedBrand = useMemo(
+    () => (selectedBrandName ? BRAND_BY_NAME[selectedBrandName] ?? null : null),
+    [selectedBrandName]
+  );
+  const selectedBrandHotels = useMemo(
+    () => (selectedBrandName ? sortHotelsByTier(hotels.filter((hotel) => hotel.brand === selectedBrandName)) : []),
+    [hotels, selectedBrandName]
+  );
   const draggedHotel = useMemo(
     () => hotels.find((hotel) => hotel.id === draggedHotelId) ?? null,
     [draggedHotelId, hotels]
   );
 
   const summaryCards = [
-    { label: 'Hotel Explored', value: exploredHotels.length },
-    { label: 'Brand Explored', value: `${exploredBrandCount}/${HYATT_BRANDS.length}` },
-    { label: 'Suite Explored', value: exploredSuiteCount },
-    { label: 'Future Hotel Stays (2026 - 2027)', value: futureHotels.length },
+    { label: 'Hotels Explored', value: exploredHotels.length },
+    { label: 'Brands Explored', value: `${exploredBrandCount}/${HYATT_BRANDS.length}` },
+    { label: 'Suites Explored', value: exploredSuiteCount },
+    { label: 'Planned Hotel Explorations', value: futureHotels.length },
     {
-      label: 'Brands Exploring (2026 - 2027)',
-      value: `${brandsExploringCount}/${Math.max(HYATT_BRANDS.length - exploredBrandCount, 0)}`
+      label: 'Planned Brand Explorations',
+      value: brandsExploringCount
     }
   ];
 
@@ -548,7 +561,7 @@ export function HyattTierListClient({
       brand: draft.brand,
       stayType: draft.stayType,
       tier: draft.stayType === 'EXPLORED' ? draft.tier ?? 'S' : null,
-      roomEntries: draft.stayType === 'EXPLORED' ? cleanedRoomEntries : []
+      roomEntries: cleanedRoomEntries
     };
   }
 
@@ -782,7 +795,21 @@ export function HyattTierListClient({
                                   </div>
                                 </div>
 
-                                <span className="mt-1 h-3 w-3 shrink-0 rounded-full" style={{ backgroundColor: brandColor }} />
+                                <div className="mt-0.5 flex shrink-0 items-center gap-1.5">
+                                  {hotel.roomEntries.length > 0 ? (
+                                    <span
+                                      className="inline-flex h-5 min-w-5 items-center justify-center rounded-full border border-[rgba(34,58,86,0.12)] bg-[rgba(34,58,86,0.08)] px-1 text-[0.625rem] font-semibold leading-none text-[rgba(34,58,86,0.72)]"
+                                      aria-label={`${hotel.roomEntries.length} logged room${hotel.roomEntries.length === 1 ? '' : 's'}`}
+                                    >
+                                      {hotel.roomEntries.length}
+                                    </span>
+                                  ) : null}
+                                  <span
+                                    className="h-5 w-5 rounded-full border border-white/80 shadow-[inset_0_1px_0_rgba(255,255,255,0.5)]"
+                                    style={{ backgroundColor: brandColor }}
+                                    aria-label={`${hotel.brand} brand color`}
+                                  />
+                                </div>
                               </div>
                             </div>
                           );
@@ -799,18 +826,20 @@ export function HyattTierListClient({
               <div className="mt-3 flex flex-wrap gap-2.5 xl:flex-col xl:gap-2">
                 {mappedBrands.length ? (
                   mappedBrands.map((brand) => (
-                    <div
+                    <button
                       key={brand.name}
-                      className="inline-flex items-center gap-2 rounded-full border px-3 py-2 text-xs font-semibold uppercase tracking-[0.12em] shadow-[0_10px_22px_rgba(26,74,122,0.06)]"
+                      type="button"
+                      onClick={() => setSelectedBrandName(brand.name)}
+                      className="inline-flex w-full items-start justify-start gap-2 rounded-full border px-3 py-2 text-left text-xs font-semibold uppercase tracking-[0.12em] shadow-[0_10px_22px_rgba(26,74,122,0.06)]"
                       style={{
                         borderColor: `${brand.color}33`,
                         backgroundColor: `${brand.color}14`,
                         color: brand.color
                       }}
                     >
-                      <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: brand.color }} />
+                      <span className="mt-0.5 h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: brand.color }} />
                       {brand.name}
-                    </div>
+                    </button>
                   ))
                 ) : (
                   <div className="rounded-[18px] border border-dashed border-[rgba(0,102,179,0.16)] bg-white/55 p-4 text-sm text-[rgba(34,58,86,0.58)]">
@@ -825,13 +854,10 @@ export function HyattTierListClient({
         <section className="glass-panel rounded-[28px] px-4 py-4 sm:px-5 sm:py-5">
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <div>
-              <p className="section-label">Future Stays</p>
-              <div className="mt-2 text-xl font-semibold text-[rgb(var(--page-foreground))] font-[family:var(--font-display)]">
-                Future Stays
-              </div>
+              <p className="section-label">Planned Hotel Explorations</p>
             </div>
             <div className="rounded-full border border-white/80 bg-white/75 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-[rgba(34,58,86,0.58)]">
-              {futureHotels.length} future hotel{futureHotels.length === 1 ? '' : 's'}
+              {futureHotels.length} planned hotel exploration{futureHotels.length === 1 ? '' : 's'}
             </div>
           </div>
 
@@ -859,7 +885,7 @@ export function HyattTierListClient({
               outlineOffset: '3px'
             }}
           >
-            <div className="grid gap-2.5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+            <div className="mt-3 grid gap-2.5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
               {futureHotels.length ? (
                 futureHotels.map((hotel) => {
                   const brandColor = BRAND_BY_NAME[hotel.brand]?.color || '#7A1F2C';
@@ -904,24 +930,117 @@ export function HyattTierListClient({
                           <div className="line-clamp-2 text-base font-semibold leading-5 text-[rgb(var(--page-foreground))] transition group-hover:text-[rgb(var(--wine))]">
                             {hotel.name}
                           </div>
-                          <div className="mt-2 text-xs text-[rgba(34,58,86,0.58)]">
-                            Drag into a tier when explored.
-                          </div>
                         </div>
-                        <span className="mt-1 h-3 w-3 shrink-0 rounded-full" style={{ backgroundColor: brandColor }} />
+                        <div className="mt-0.5 flex shrink-0 items-center gap-1.5">
+                          {hotel.roomEntries.length > 0 ? (
+                            <span
+                              className="inline-flex h-5 min-w-5 items-center justify-center rounded-full border border-[rgba(34,58,86,0.12)] bg-[rgba(34,58,86,0.08)] px-1 text-[0.625rem] font-semibold leading-none text-[rgba(34,58,86,0.72)]"
+                              aria-label={`${hotel.roomEntries.length} logged room${hotel.roomEntries.length === 1 ? '' : 's'}`}
+                            >
+                              {hotel.roomEntries.length}
+                            </span>
+                          ) : null}
+                          <span
+                            className="h-5 w-5 rounded-full border border-white/80 shadow-[inset_0_1px_0_rgba(255,255,255,0.5)]"
+                            style={{ backgroundColor: brandColor }}
+                            aria-label={`${hotel.brand} brand color`}
+                          />
+                        </div>
                       </div>
                     </div>
                   );
                 })
               ) : (
                 <div className="rounded-[18px] border border-dashed border-[rgba(0,102,179,0.16)] bg-white/55 p-4 text-sm text-[rgba(34,58,86,0.58)]">
-                  No future stays yet.
+                  No planned hotel explorations yet.
                 </div>
               )}
             </div>
           </div>
         </section>
       </div>
+
+      {selectedBrand && selectedBrandHotels.length ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-[rgba(42,18,22,0.48)] px-4 py-8 backdrop-blur-sm">
+          <div className="glass-panel w-full max-w-3xl rounded-[30px] p-5 sm:p-7">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="section-label">Hyatt Brands</p>
+                <h2 className="mt-2 text-3xl font-semibold leading-none text-[rgb(var(--page-foreground))] font-[family:var(--font-display)] sm:text-4xl">
+                  {selectedBrand.name}
+                </h2>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setSelectedBrandName(null)}
+                className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-[rgba(118,31,47,0.16)] bg-white/80 text-lg text-[rgb(var(--wine))] transition hover:bg-[rgba(118,31,47,0.06)]"
+                aria-label="Close brand hotels"
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="mt-6 max-h-[70vh] space-y-5 overflow-auto pr-1">
+              {(['EXPLORED', 'FUTURE'] as const).map((stayType) => {
+                const brandHotels = selectedBrandHotels.filter((hotel) => hotel.stayType === stayType);
+
+                if (!brandHotels.length) {
+                  return null;
+                }
+
+                return (
+                  <section key={stayType} className="rounded-[24px] border border-[rgba(0,102,179,0.12)] bg-white/68 p-4">
+                    <div className="mb-3 flex items-center justify-between gap-3">
+                      <div className="text-sm font-semibold uppercase tracking-[0.16em] text-[rgba(34,58,86,0.58)]">
+                        {stayType === 'EXPLORED' ? 'Explored' : 'Planned'}
+                      </div>
+                      <div className="rounded-full border border-white/80 bg-white/75 px-3 py-1 text-xs font-semibold uppercase tracking-[0.16em] text-[rgba(34,58,86,0.58)]">
+                        {brandHotels.length}
+                      </div>
+                    </div>
+
+                    <div className="space-y-3">
+                      {brandHotels.map((hotel) => (
+                        <div
+                          key={hotel.id}
+                          className="rounded-[20px] border p-4"
+                          style={{
+                            borderColor: `${selectedBrand.color}22`,
+                            backgroundColor: `${selectedBrand.color}0D`
+                          }}
+                        >
+                          <div className="flex items-start justify-between gap-3">
+                            <div>
+                              <div className="text-base font-semibold text-[rgb(var(--page-foreground))]">
+                                {hotel.name}
+                              </div>
+                              <div className="mt-1 text-xs uppercase tracking-[0.14em] text-[rgba(34,58,86,0.52)]">
+                                {stayType === 'EXPLORED'
+                                  ? `${hotel.tier ?? 'Unranked'}${hotel.tier ? '-Tier' : ''}`
+                                  : 'Planned'}
+                              </div>
+                              {hotel.roomEntries.length ? (
+                                <div className="mt-2 text-sm text-[rgba(34,58,86,0.68)]">
+                                  {formatRoomEntries(hotel.roomEntries)}
+                                </div>
+                              ) : null}
+                            </div>
+
+                            <div className="inline-flex h-8 min-w-8 items-center justify-center rounded-full border border-[rgba(34,58,86,0.12)] bg-white/75 px-2 text-xs font-semibold text-[rgba(34,58,86,0.72)]">
+                              {hotel.roomEntries.length}
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </section>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {isBrandPaletteOpen ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-[rgba(42,18,22,0.48)] px-4 py-8 backdrop-blur-sm">
@@ -980,14 +1099,16 @@ export function HyattTierListClient({
             role="dialog"
             aria-modal="true"
             aria-label={modalState.mode === 'edit' ? 'Edit hotel stay' : 'Add hotel stay'}
-            className="glass-panel w-full max-w-2xl max-h-[calc(100vh-2rem)] overflow-y-auto rounded-[30px] p-5 sm:p-7"
+            className="glass-panel max-h-[calc(100vh-2rem)] w-full max-w-2xl overflow-y-auto rounded-[30px] p-5 sm:p-7"
           >
             <div className="flex items-start justify-between gap-4">
               <div>
                 <p className="section-label">{modalState.mode === 'edit' ? 'Edit Hotel' : 'Add Hotel'}</p>
-                <h2 className="mt-2 text-3xl font-semibold leading-none text-[rgb(var(--page-foreground))] font-[family:var(--font-display)] sm:text-4xl">
-                  {modalState.mode === 'edit' ? 'Update this stay' : 'Add a Hyatt stay'}
-                </h2>
+                {modalState.mode === 'edit' ? (
+                  <h2 className="mt-2 text-3xl font-semibold leading-none text-[rgb(var(--page-foreground))] font-[family:var(--font-display)] sm:text-4xl">
+                    Update this stay
+                  </h2>
+                ) : null}
               </div>
 
               <button
@@ -1035,8 +1156,7 @@ export function HyattTierListClient({
                       setDraft((current) => ({
                         ...current,
                         stayType: value as StayType,
-                        tier: value === 'EXPLORED' ? current.tier ?? 'S' : null,
-                        roomEntries: value === 'EXPLORED' ? current.roomEntries : []
+                        tier: value === 'EXPLORED' ? current.tier ?? 'S' : null
                       }))
                     }
                     options={STAY_TYPE_OPTIONS}
@@ -1044,85 +1164,85 @@ export function HyattTierListClient({
                 </label>
 
                 {draft.stayType === 'EXPLORED' ? (
-                  <>
-                    <label className="block space-y-2 md:col-span-2 lg:col-span-1">
-                      <span className="text-sm font-semibold text-[rgb(var(--page-foreground))]">Tier</span>
-                      <FancySelect
-                        value={draft.tier ?? 'S'}
-                        onChange={(value) => setDraft((current) => ({ ...current, tier: value as Tier }))}
-                        options={TIERS.map((tier) => ({
-                          value: tier,
-                          label: `${tier}-Tier`
-                        }))}
-                      />
-                    </label>
-
-                    <div className="space-y-3 md:col-span-2">
-                      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                        <div>
-                          <div className="text-sm font-semibold text-[rgb(var(--page-foreground))]">Room Type</div>
-                          <div className="mt-1 text-xs text-[rgba(34,58,86,0.58)]">
-                            Add each room or suite you stayed in for this hotel.
-                          </div>
-                        </div>
-
-                        <button
-                          type="button"
-                          onClick={addRoomEntry}
-                          className="inline-flex items-center justify-center rounded-full border border-[rgba(0,102,179,0.16)] bg-white/82 px-4 py-2 text-sm font-semibold text-[rgb(var(--wine))] transition hover:bg-[rgba(0,102,179,0.06)]"
-                        >
-                          Add room type
-                        </button>
-                      </div>
-
-                      {draft.roomEntries.length ? (
-                        <div className="space-y-3">
-                          {draft.roomEntries.map((entry, index) => (
-                            <div
-                              key={`${index}-${entry.kind}`}
-                              className="grid gap-3 rounded-[20px] border border-[rgba(0,102,179,0.1)] bg-white/72 p-3 md:grid-cols-[minmax(0,1fr)_10rem_auto]"
-                            >
-                              <input
-                                value={entry.label}
-                                onChange={(event) =>
-                                  updateRoomEntry(index, (current) => ({
-                                    ...current,
-                                    label: event.target.value
-                                  }))
-                                }
-                                placeholder="Standard"
-                                className="w-full rounded-[16px] border border-[rgba(118,31,47,0.14)] bg-white/92 px-4 py-3 text-sm text-[rgb(var(--page-foreground))] outline-none transition focus:border-[rgba(118,31,47,0.32)] focus:ring-4 focus:ring-[rgba(118,31,47,0.08)]"
-                              />
-
-                              <FancySelect
-                                value={entry.kind}
-                                onChange={(value) =>
-                                  updateRoomEntry(index, (current) => ({
-                                    ...current,
-                                    kind: value as RoomEntryKind
-                                  }))
-                                }
-                                options={ROOM_KIND_OPTIONS}
-                              />
-
-                              <button
-                                type="button"
-                                onClick={() => removeRoomEntry(index)}
-                                className="inline-flex items-center justify-center rounded-full border border-[rgba(163,33,48,0.18)] bg-[rgba(163,33,48,0.08)] px-4 py-2 text-sm font-semibold text-[#a32130] transition hover:bg-[rgba(163,33,48,0.12)]"
-                              >
-                                Remove
-                              </button>
-                            </div>
-                          ))}
-                        </div>
-                      ) : (
-                        <div className="rounded-[18px] border border-dashed border-[rgba(0,102,179,0.16)] bg-white/55 p-4 text-sm text-[rgba(34,58,86,0.58)]">
-                          No room types added yet.
-                        </div>
-                      )}
-                    </div>
-                  </>
+                  <label className="block space-y-2 md:col-span-2 lg:col-span-1">
+                    <span className="text-sm font-semibold text-[rgb(var(--page-foreground))]">Tier</span>
+                    <FancySelect
+                      value={draft.tier ?? 'S'}
+                      onChange={(value) => setDraft((current) => ({ ...current, tier: value as Tier }))}
+                      options={TIERS.map((tier) => ({
+                        value: tier,
+                        label: `${tier}-Tier`
+                      }))}
+                    />
+                  </label>
                 ) : null}
+
+                <div className="space-y-3 md:col-span-2">
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                    <div>
+                      <div className="text-sm font-semibold text-[rgb(var(--page-foreground))]">Room Type</div>
+                      <div className="mt-1 text-xs text-[rgba(34,58,86,0.58)]">
+                        {draft.stayType === 'EXPLORED'
+                          ? 'Add each room or suite you stayed in for this hotel.'
+                          : 'Add planned room or suite types for this hotel.'}
+                      </div>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={addRoomEntry}
+                      className="inline-flex items-center justify-center rounded-full border border-[rgba(0,102,179,0.16)] bg-white/82 px-4 py-2 text-sm font-semibold text-[rgb(var(--wine))] transition hover:bg-[rgba(0,102,179,0.06)]"
+                    >
+                      Add room type
+                    </button>
+                  </div>
+
+                  {draft.roomEntries.length ? (
+                    <div className="space-y-3">
+                      {draft.roomEntries.map((entry, index) => (
+                        <div
+                          key={`${index}-${entry.kind}`}
+                          className="grid gap-3 rounded-[20px] border border-[rgba(0,102,179,0.1)] bg-white/72 p-3 md:grid-cols-[minmax(0,1fr)_10rem_auto]"
+                        >
+                          <input
+                            value={entry.label}
+                            onChange={(event) =>
+                              updateRoomEntry(index, (current) => ({
+                                ...current,
+                                label: event.target.value
+                              }))
+                            }
+                            placeholder="Standard"
+                            className="w-full rounded-[16px] border border-[rgba(118,31,47,0.14)] bg-white/92 px-4 py-3 text-sm text-[rgb(var(--page-foreground))] outline-none transition focus:border-[rgba(118,31,47,0.32)] focus:ring-4 focus:ring-[rgba(118,31,47,0.08)]"
+                          />
+
+                          <FancySelect
+                            value={entry.kind}
+                            onChange={(value) =>
+                              updateRoomEntry(index, (current) => ({
+                                ...current,
+                                kind: value as RoomEntryKind
+                              }))
+                            }
+                            options={ROOM_KIND_OPTIONS}
+                          />
+
+                          <button
+                            type="button"
+                            onClick={() => removeRoomEntry(index)}
+                            className="inline-flex items-center justify-center rounded-full border border-[rgba(163,33,48,0.18)] bg-[rgba(163,33,48,0.08)] px-4 py-2 text-sm font-semibold text-[#a32130] transition hover:bg-[rgba(163,33,48,0.12)]"
+                          >
+                            Remove
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="rounded-[18px] border border-dashed border-[rgba(0,102,179,0.16)] bg-white/55 p-4 text-sm text-[rgba(34,58,86,0.58)]">
+                      No room types added yet.
+                    </div>
+                  )}
+                </div>
               </div>
 
               {errorMessage ? (

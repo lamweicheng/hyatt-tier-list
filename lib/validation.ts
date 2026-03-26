@@ -31,13 +31,10 @@ export const hotelFormSchema = z
   })
   .transform((value) => ({
     ...value,
-    roomEntries:
-      value.stayType === 'EXPLORED'
-        ? value.roomEntries.map((entry) => ({
-            label: entry.label.trim(),
-            kind: entry.kind
-          }))
-        : []
+    roomEntries: value.roomEntries.map((entry) => ({
+      label: entry.label.trim(),
+      kind: entry.kind
+    }))
   }));
 
 export type HotelFormPayload = z.infer<typeof hotelFormSchema>;
