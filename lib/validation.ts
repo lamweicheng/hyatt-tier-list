@@ -1,40 +1,28 @@
 import { z } from 'zod';
-import { PILLARS } from './constants';
+import { HYATT_BRANDS, TIERS } from './hyatt-data';
 
-// Phase 1 (internal id 0): instance initialization and key due dates
-export const phase0Schema = z.object({
-  pillar: z.enum(PILLARS, {
-    errorMap: () => ({ message: 'Select a pillar' })
+const BRAND_NAMES = HYATT_BRANDS.map((brand) => brand.name) as [string, ...string[]];
+
+export const hotelFormSchema = z.object({
+  name: z.string().trim().min(1, 'Hotel name is required').max(120, 'Max 120 characters'),
+  brand: z.enum(BRAND_NAMES, {
+    errorMap: () => ({ message: 'Choose a Hyatt brand' })
   }),
-  emManagerName: z.string().min(1, 'EM Manager name is required').max(120, 'Max 120 characters'),
-  emManagerEmail: z
-    .string()
-    .email('Enter a valid email')
-    .max(160, 'Max 160 characters')
-    .optional()
-    .or(z.literal('')),
-  gspPlannerName: z.string().min(1, 'GSP Planner name is required').max(120, 'Max 120 characters'),
-  gspPlannerEmail: z
-    .string()
-    .email('Enter a valid email')
-    .max(160, 'Max 160 characters')
-    .optional()
-    .or(z.literal('')),
-  tpmName: z
-    .string()
-    .max(120, 'Max 120 characters')
-    .optional()
-    .or(z.literal('')),
-  tpmEmail: z
-    .string()
-    .email('Enter a valid TPM email')
-    .max(160, 'Max 160 characters')
-    .optional()
-    .or(z.literal('')),
-  // Dates are provided as YYYY-MM-DD strings from the UI and parsed on the server
-  duePreparation: z.string().min(1, 'Preparation due (assignee forecast) is required'),
-  dueReview: z.string().min(1, 'Review due (approver review) is required'),
-  dueSubmission: z.string().min(1, 'Submission due (send forecast to TPM) is required')
+  tier: z.enum(TIERS, {
+    errorMap: () => ({ message: 'Select a tier' })
+  })
 });
 
-export type Phase0Payload = z.infer<typeof phase0Schema>;
+export type HotelFormPayload = z.infer<typeof hotelFormSchema>;
+
+export const hotelReorderSchema = z.object({
+  hotels: z.array(
+    z.object({
+      id: z.string().min(1),
+      tier: z.enum(TIERS),
+      position: z.number().int().min(0)
+    })
+  )
+});
+
+export type HotelReorderPayload = z.infer<typeof hotelReorderSchema>;

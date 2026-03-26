@@ -1,25 +1,35 @@
 import './globals.css';
 import type { Metadata } from 'next';
+import { Cormorant_Garamond, Manrope } from 'next/font/google';
 import { ReactNode } from 'react';
-import { SessionDataProvider } from './SessionDataProvider';
+
+const sans = Manrope({
+  subsets: ['latin'],
+  variable: '--font-sans',
+  weight: ['400', '500', '600', '700', '800']
+});
+
+const display = Cormorant_Garamond({
+  subsets: ['latin'],
+  variable: '--font-display',
+  weight: ['500', '600', '700']
+});
 
 export const metadata: Metadata = {
-  title: 'Forecast Management System',
-  description: 'Mock-up of AbbVie forecast management workflow',
+  title: 'My Hyatt Tier List',
+  description: 'Rank Hyatt hotels by tier with a polished interface and future-ready persistence.',
   icons: {
     icon: [{ url: '/favicon.png', type: 'image/png' }],
     apple: '/favicon.png'
-  }
-  ,
-  // Provide a base URL for resolving open graph / twitter images. Use an env var in production.
+  },
   metadataBase: new URL(process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000'),
   openGraph: {
-    title: 'Forecast Management Portal',
-    description: 'Mock-up of AbbVie forecast management workflow',
+    title: 'My Hyatt Tier List',
+    description: 'Curate your own Hyatt tier list across the full brand portfolio.',
     images: ['/favicon.png']
   },
   twitter: {
-    title: 'Forecast Management Portal',
+    title: 'My Hyatt Tier List',
     card: 'summary',
     images: ['/favicon.png']
   }
@@ -28,10 +38,8 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="en">
-      <body className="min-h-screen antialiased">
-        <div className="mx-auto max-w-8xl p-10">
-          <SessionDataProvider>{children}</SessionDataProvider>
-        </div>
+      <body className={`${sans.variable} ${display.variable} min-h-screen font-[family:var(--font-sans)] antialiased`}>
+        {children}
       </body>
     </html>
   );

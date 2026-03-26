@@ -1,21 +1,14 @@
-# Forecast Management Portal
+# Hyatt Tier List
 
-Lightweight, click-through forecast management portal for AbbVie. This is a UI prototype focused on demonstrating the workflow and screens, not a production-ready system.
+Rank Hyatt hotels across five tiers: S, A, B, C, and D. The app ships with a curated 38-brand Hyatt portfolio, assigns each brand its own color, and supports add/edit flows from a single modal.
 
-## What’s included
+## What is in the app
 
-- Landing page with a Records table and filters.
-- Phase screens (1–6) that show the key UI for each step.
-- Setup (Forecast Cycle Pre-Setup) screens to configure the recurring template (pillar/products/TPM, recurrence + window, default roles, and TPM submission scheduling rule).
-
-## Phases
-
-- Phase 1 – Instance Initialization
-- Phase 2 – Forecast preparation
-- Phase 3 – Review & approval
-- Phase 4 – Forecast submission to TPM
-- Phase 5 – TPM confirmation
-- Phase 6 – Store & close
+- A redesigned homepage with a luxury-inspired Hyatt-style UI.
+- Tier rows that update immediately when a hotel is added or edited.
+- A shared modal for both create and edit actions.
+- Local-first persistence when no database is configured.
+- Prisma-backed API routes ready for Vercel + Postgres once `DATABASE_URL` and `DIRECT_URL` are set.
 
 ## Running locally
 
@@ -25,3 +18,14 @@ npm run dev
 ```
 
 Open http://localhost:3000
+
+## Database setup
+
+The UI works without a database by storing entries in local browser storage. To enable server persistence:
+
+```bash
+npm run prisma:generate
+npm run prisma:migrate
+```
+
+Set the environment variables from `.env.example` before running migrations.

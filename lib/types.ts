@@ -1,15 +1,22 @@
-export type UIForecastRecord = {
-  id: string;
-  pillar: string;
-  emManagerName: string;
-  emManagerEmail?: string | null;
-  gspPlannerName: string;
-  gspPlannerEmail?: string | null;
-  tpmName?: string | null;
-  tpmEmail?: string | null;
-  duePreparation: string; // ISO string
-  dueReview: string; // ISO string
-  dueSubmission: string; // ISO string
-  status: string;
-  createdAt: string;
+export type Tier = 'S' | 'A' | 'B' | 'C' | 'D';
+
+export type HyattBrand = {
+  name: string;
+  color: string;
+  segment: string;
 };
+
+export type HotelDraft = {
+  name: string;
+  brand: string;
+  tier: Tier;
+};
+
+export type HotelRecord = HotelDraft & {
+  id: string;
+  position: number;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type PersistenceMode = 'database' | 'local';
