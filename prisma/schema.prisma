@@ -1,0 +1,27 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+  // Use a non-pooled connection for migrations (recommended for Neon/Supabase)
+  directUrl = env("DIRECT_URL")
+}
+
+model ForecastRecord {
+  id               String   @id @default(cuid())
+  pillar           String
+  emManagerName    String
+  emManagerEmail   String?
+  gspPlannerName   String
+  gspPlannerEmail  String?
+  dueGspSubmission DateTime
+  dueEmReview      DateTime
+  dueTpmSubmission DateTime
+  tpmName          String?
+  tpmEmail         String?
+  status           String   @default("Preparation")
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+}
