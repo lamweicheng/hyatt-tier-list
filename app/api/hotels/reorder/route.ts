@@ -14,8 +14,8 @@ export async function POST(request: Request) {
 
   try {
     const payload = await request.json();
-    const hotels = await reorderHotels(payload);
-    return NextResponse.json({ hotels });
+    await reorderHotels(payload);
+    return NextResponse.json({ ok: true });
   } catch (error) {
     const normalized = normalizeRouteError(error);
     return NextResponse.json({ message: normalized.message }, { status: normalized.status });

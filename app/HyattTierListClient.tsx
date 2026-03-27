@@ -1,6 +1,6 @@
 'use client';
 
-import { FormEvent, startTransition, useEffect, useMemo, useState } from 'react';
+import { FormEvent, startTransition, useEffect, useMemo, useRef, useState } from 'react';
 import { BRAND_BY_NAME, BRANDS_BY_SEGMENT, HYATT_BRANDS, TIERS, sortHotelsByTier } from '@/lib/hyatt-data';
 import { FancySelect } from '@/components/ui/fancy-select';
 import type {
@@ -93,6 +93,14 @@ type DropTarget = {
   stayType: StayType;
   tier: Tier | null;
   beforeHotelId: string | null;
+};
+
+type BrandVisualStyle = {
+  borderColor: string;
+  background: string;
+  labelColor: string;
+  dotColor: string;
+  shadowColor: string;
 };
 
 function isTier(value: unknown): value is Tier {
@@ -236,8 +244,29 @@ function resolveDropTargetFromPointer(
   stayType: StayType,
   tier: Tier | null
 ): DropTarget {
-  const elementUnderPointer = document.elementFromPoint(event.clientX, event.clientY) as HTMLElement | null;
-  const hotelCard = elementUnderPointer?.closest<HTMLElement>('[data-hotel-id]');
+  const scope = event.currentTarget as HTMLElement;
+  const hotelCards = Array.from(scope.querySelectorAll<HTMLElement>('[data-hotel-id]'));
+
+  const sortedCards = hotelCards.sort((left, right) => {
+    const leftRect = left.getBoundingClientRect();
+    const rightRect = right.getBoundingClientRect();
+
+    if (Math.abs(leftRect.top - rightRect.top) > 8) {
+      return leftRect.top - rightRect.top;
+    }
+
+    return leftRect.left - rightRect.left;
+  });
+
+  const hotelCard =
+    sortedCards.find((card) => {
+      const rect = card.getBoundingClientRect();
+      const pointerAboveMidpoint = event.clientY < rect.top + rect.height / 2;
+      const sameRow = Math.abs(event.clientY - (rect.top + rect.height / 2)) <= rect.height / 1.5;
+      const pointerLeftOfMidpoint = event.clientX < rect.left + rect.width / 2;
+
+      return pointerAboveMidpoint || (sameRow && pointerLeftOfMidpoint);
+    }) ?? null;
 
   return {
     stayType,
@@ -271,6 +300,59 @@ function formatRoomEntries(entries: RoomEntry[]) {
   return entries.map((entry) => entry.label).join(', ');
 }
 
+function hexToRgb(hex: string) {
+  const sanitized = hex.replace('#', '');
+  const normalized = sanitized.length === 3
+    ? sanitized
+        .split('')
+        .map((char) => `${char}${char}`)
+        .join('')
+    : sanitized;
+
+  const value = Number.parseInt(normalized, 16);
+
+  return {
+    r: (value >> 16) & 255,
+    g: (value >> 8) & 255,
+    b: value & 255
+  };
+}
+
+function rgba(hex: string, alpha: number) {
+  const { r, g, b } = hexToRgb(hex);
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
+
+function shiftColor(hex: string, amount: number) {
+  const { r, g, b } = hexToRgb(hex);
+  const clamp = (value: number) => Math.max(0, Math.min(255, Math.round(value)));
+
+  const shifted = {
+    r: clamp(r + amount),
+    g: clamp(g + amount / 2),
+    b: clamp(b - amount / 3)
+  };
+
+  return `#${[shifted.r, shifted.g, shifted.b]
+    .map((value) => value.toString(16).padStart(2, '0'))
+    .join('')}`;
+}
+
+function getBrandVisualStyle(brandName: string, brandColor: string): BrandVisualStyle {
+  const hash = [...brandName].reduce((total, char) => total + char.charCodeAt(0), 0);
+  const offset = (hash % 5) * 16 - 24;
+  const accent = shiftColor(brandColor, offset);
+  const paleAccent = shiftColor(brandColor, offset > 0 ? 42 : 28);
+
+  return {
+    borderColor: rgba(brandColor, 0.55),
+    background: `linear-gradient(135deg, ${rgba(accent, 0.14)} 0%, ${rgba(paleAccent, 0.1)} 34%, rgba(255,255,255,0.96) 100%)`,
+    labelColor: shiftColor(brandColor, -22),
+    dotColor: accent,
+    shadowColor: rgba(accent, 0.14)
+  };
+}
+
 export function HyattTierListClient({
   initialHotels,
   persistenceMode
@@ -287,8 +369,11 @@ export function HyattTierListClient({
   const [draggedHotelId, setDraggedHotelId] = useState<string | null>(null);
   const [dropTarget, setDropTarget] = useState<DropTargetState>(null);
   const [recentlyDraggedHotelId, setRecentlyDraggedHotelId] = useState<string | null>(null);
-  const [isBrandPaletteOpen, setIsBrandPaletteOpen] = useState(false);
+  const [isCompactMode, setIsCompactMode] = useState(false);
+  const [isAllBrandsOpen, setIsAllBrandsOpen] = useState(false);
+  const [isExploredBrandsOpen, setIsExploredBrandsOpen] = useState(false);
   const [selectedBrandName, setSelectedBrandName] = useState<string | null>(null);
+  const reorderRequestIdRef = useRef(0);
 
   useEffect(() => {
     setIsHydrated(true);
@@ -481,6 +566,12 @@ export function HyattTierListClient({
       return;
     }
 
+    const previousHotels = hotels;
+    const requestId = reorderRequestIdRef.current + 1;
+    reorderRequestIdRef.current = requestId;
+
+    setHotels(orderedHotels);
+    resetDragState();
     setIsSaving(true);
     setErrorMessage(null);
 
@@ -500,18 +591,18 @@ export function HyattTierListClient({
         })
       });
 
-      const result = (await response.json()) as { hotels?: HotelRecord[]; message?: string };
+      const result = (await response.json()) as { ok?: boolean; message?: string };
 
-      if (!response.ok || !result.hotels) {
+      if (!response.ok || !result.ok) {
         throw new Error(result.message || 'Unable to reorder hotels.');
       }
-
-      setHotels(normalizeHotelCollection(result.hotels.map(normalizeHotelRecord)));
     } catch (error) {
+      if (requestId === reorderRequestIdRef.current) {
+        setHotels(previousHotels);
+      }
       setErrorMessage(error instanceof Error ? error.message : 'Unable to reorder hotels.');
     } finally {
       setIsSaving(false);
-      resetDragState();
     }
   }
 
@@ -659,9 +750,9 @@ export function HyattTierListClient({
               <div className="flex flex-col gap-3 sm:flex-row sm:items-center lg:justify-end">
                 <button
                   type="button"
-                  onClick={() => setIsBrandPaletteOpen(true)}
+                  onClick={() => setIsAllBrandsOpen(true)}
                   className="inline-flex items-center justify-center rounded-full border border-[rgba(0,102,179,0.18)] bg-white/82 px-5 py-3 text-sm font-semibold text-[rgb(var(--wine))] shadow-[0_12px_24px_rgba(26,74,122,0.08)] transition hover:-translate-y-0.5 hover:bg-[rgba(0,102,179,0.06)]"
-                  aria-label="Open brand palette"
+                  aria-label="Open all Hyatt brands"
                 >
                   Brands
                 </button>
@@ -682,8 +773,8 @@ export function HyattTierListClient({
                       {card.label === 'Brands Explored' ? (
                         <button
                           type="button"
-                          onClick={() => setIsBrandPaletteOpen(true)}
-                          className="transition hover:text-[rgb(var(--wine))]"
+                          onClick={() => setIsExploredBrandsOpen(true)}
+                          className="text-[0.62rem] uppercase tracking-[0.14em] text-[rgba(34,58,86,0.52)] transition hover:text-[rgb(var(--wine))] sm:text-[0.72rem] sm:tracking-[0.16em]"
                         >
                           {card.label}
                         </button>
@@ -701,7 +792,17 @@ export function HyattTierListClient({
         </section>
 
         <section className="glass-panel rounded-[28px] px-4 py-4 sm:px-5 sm:py-5">
-          <p className="section-label">Tier Board</p>
+          <div className="flex items-center justify-between gap-3">
+            <p className="section-label">Tier Board</p>
+            <button
+              type="button"
+              onClick={() => setIsCompactMode((current) => !current)}
+              className="inline-flex items-center justify-center rounded-full border border-[rgba(0,102,179,0.18)] bg-white/82 px-4 py-2 text-xs font-semibold uppercase tracking-[0.14em] text-[rgb(var(--wine))] shadow-[0_12px_24px_rgba(26,74,122,0.08)] transition hover:-translate-y-0.5 hover:bg-[rgba(0,102,179,0.06)]"
+              aria-pressed={isCompactMode}
+            >
+              Compact
+            </button>
+          </div>
 
           <div className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,1fr)_280px]">
             <div className="flex flex-col gap-3">
@@ -725,7 +826,9 @@ export function HyattTierListClient({
                       const target = resolveDropTargetFromPointer(event, 'EXPLORED', tier);
                       void handleDropOnTarget(target.stayType, target.tier, target.beforeHotelId);
                     }}
-                    className={`tier-shell rounded-[24px] bg-gradient-to-r ${tierStyle.panel} p-3.5 sm:p-4`}
+                    className={`tier-shell rounded-[24px] ${
+                      isCompactMode ? 'min-h-[104px] bg-white/92 p-2.5 sm:min-h-[112px] sm:p-3' : `bg-gradient-to-r ${tierStyle.panel} p-3.5 sm:p-4`
+                    }`}
                     style={{
                       outline:
                         dropTarget?.stayType === 'EXPLORED' && dropTarget.tier === tier
@@ -734,22 +837,31 @@ export function HyattTierListClient({
                       outlineOffset: '3px'
                     }}
                   >
-                    <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-                      <div className="flex items-center gap-3">
-                        <div className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl text-lg font-bold ${tierStyle.badge}`}>
-                          {tier}
+                    <div className={isCompactMode ? 'grid gap-2 md:grid-cols-[68px_minmax(0,1fr)] md:items-stretch' : ''}>
+                      <div className={isCompactMode ? 'flex md:block' : 'flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between'}>
+                        <div className="flex items-center gap-3">
+                          <div
+                            className={`flex shrink-0 items-center justify-center font-bold ${tierStyle.badge} ${
+                              isCompactMode ? 'h-[56px] w-[56px] rounded-[18px] text-xl' : 'h-11 w-11 rounded-2xl text-lg'
+                            }`}
+                          >
+                            {tier}
+                          </div>
+                          {!isCompactMode ? (
+                            <div className="text-base font-semibold text-[rgb(var(--page-foreground))] sm:text-lg">
+                              {tier}-Tier
+                            </div>
+                          ) : null}
                         </div>
-                        <div className="text-base font-semibold text-[rgb(var(--page-foreground))] sm:text-lg">
-                          {tier}-Tier
-                        </div>
+
+                        {!isCompactMode ? (
+                          <div className="rounded-full border border-white/80 bg-white/75 px-2.5 py-1 text-[0.65rem] font-semibold uppercase tracking-[0.14em] text-[rgba(34,58,86,0.58)] sm:px-3 sm:text-xs sm:tracking-[0.18em]">
+                            {tierHotels.length} hotel{tierHotels.length === 1 ? '' : 's'}
+                          </div>
+                        ) : null}
                       </div>
 
-                      <div className="rounded-full border border-white/80 bg-white/75 px-2.5 py-1 text-[0.65rem] font-semibold uppercase tracking-[0.14em] text-[rgba(34,58,86,0.58)] sm:px-3 sm:text-xs sm:tracking-[0.18em]">
-                        {tierHotels.length} hotel{tierHotels.length === 1 ? '' : 's'}
-                      </div>
-                    </div>
-
-                    <div className="mt-3 grid gap-2.5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
+                      <div className={isCompactMode ? 'mt-2 flex min-h-[72px] flex-wrap content-start gap-1.5 md:mt-0 sm:min-h-[80px]' : 'mt-3 grid gap-2.5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5'}>
                       {tierHotels.length === 0 ? (
                         <div className="rounded-[18px] border border-dashed border-[rgba(0,102,179,0.16)] bg-white/55 p-4 text-sm text-[rgba(34,58,86,0.58)]">
                           {tierStyle.empty}
@@ -757,6 +869,7 @@ export function HyattTierListClient({
                       ) : (
                         tierHotels.map((hotel) => {
                           const brandColor = BRAND_BY_NAME[hotel.brand]?.color || '#7A1F2C';
+                          const brandStyle = getBrandVisualStyle(hotel.brand, brandColor);
 
                           return (
                             <div
@@ -786,47 +899,58 @@ export function HyattTierListClient({
                               aria-grabbed={draggedHotelId === hotel.id}
                               role="button"
                               tabIndex={0}
-                              className="group rounded-[18px] border-2 p-3 text-left transition hover:-translate-y-0.5 hover:shadow-[0_14px_26px_rgba(26,74,122,0.11)]"
+                              className={`group border-2 text-left transition hover:-translate-y-0.5 hover:shadow-[0_14px_26px_rgba(26,74,122,0.11)] ${
+                                isCompactMode ? 'rounded-[10px] px-2.5 py-1.5' : 'rounded-[18px] p-3'
+                              }`}
                               style={{
                                 borderColor:
                                   dropTarget?.stayType === 'EXPLORED' &&
                                   dropTarget.tier === tier &&
                                   dropTarget.beforeHotelId === hotel.id
                                     ? `${brandColor}BB`
-                                    : `${brandColor}70`,
-                                background: `linear-gradient(135deg, ${brandColor}14 0%, rgba(255,255,255,0.94) 48%, rgba(255,255,255,0.88) 100%)`,
-                                boxShadow: `inset 0 1px 0 rgba(255,255,255,0.8), 0 14px 30px ${brandColor}10`,
+                                    : brandStyle.borderColor,
+                                background: isCompactMode
+                                  ? `linear-gradient(135deg, ${rgba(brandStyle.dotColor, 0.16)} 0%, rgba(255,255,255,0.96) 70%)`
+                                  : brandStyle.background,
+                                boxShadow: `inset 0 1px 0 rgba(255,255,255,0.8), 0 14px 30px ${brandStyle.shadowColor}`,
                                 opacity: draggedHotelId === hotel.id ? 0.55 : 1,
                                 cursor: draggedHotelId === hotel.id ? 'grabbing' : 'grab'
                               }}
                             >
-                              <div className="flex items-start justify-between gap-3">
+                              <div className={`flex ${isCompactMode ? 'items-center justify-start' : 'items-start justify-between'} gap-3`}>
                                 <div>
-                                  <div className="line-clamp-2 text-sm font-semibold leading-5 text-[rgb(var(--page-foreground))] transition group-hover:text-[rgb(var(--wine))] sm:text-base">
+                                  <div className={`text-[rgb(var(--page-foreground))] transition group-hover:text-[rgb(var(--wine))] ${
+                                    isCompactMode
+                                      ? 'whitespace-nowrap text-[0.72rem] font-semibold leading-none sm:text-xs'
+                                      : 'line-clamp-2 text-sm font-semibold leading-5 sm:text-base'
+                                  }`}>
                                     {hotel.name}
                                   </div>
                                 </div>
 
-                                <div className="mt-0.5 flex shrink-0 items-center gap-1.5">
-                                  {hotel.roomEntries.length > 0 ? (
+                                {!isCompactMode ? (
+                                  <div className="mt-0.5 flex shrink-0 items-center gap-1.5">
+                                    {hotel.roomEntries.length > 0 ? (
+                                      <span
+                                        className="inline-flex h-5 min-w-5 items-center justify-center rounded-full border border-[rgba(34,58,86,0.12)] bg-[rgba(34,58,86,0.08)] px-1 text-[0.625rem] font-semibold leading-none text-[rgba(34,58,86,0.72)]"
+                                        aria-label={`${hotel.roomEntries.length} logged room${hotel.roomEntries.length === 1 ? '' : 's'}`}
+                                      >
+                                        {hotel.roomEntries.length}
+                                      </span>
+                                    ) : null}
                                     <span
-                                      className="inline-flex h-5 min-w-5 items-center justify-center rounded-full border border-[rgba(34,58,86,0.12)] bg-[rgba(34,58,86,0.08)] px-1 text-[0.625rem] font-semibold leading-none text-[rgba(34,58,86,0.72)]"
-                                      aria-label={`${hotel.roomEntries.length} logged room${hotel.roomEntries.length === 1 ? '' : 's'}`}
-                                    >
-                                      {hotel.roomEntries.length}
-                                    </span>
-                                  ) : null}
-                                  <span
-                                    className="h-5 w-5 rounded-full border border-white/80 shadow-[inset_0_1px_0_rgba(255,255,255,0.5)]"
-                                    style={{ backgroundColor: brandColor }}
-                                    aria-label={`${hotel.brand} brand color`}
-                                  />
-                                </div>
+                                      className="h-5 w-5 rounded-full border border-white/80 shadow-[inset_0_1px_0_rgba(255,255,255,0.5)]"
+                                      style={{ backgroundColor: brandStyle.dotColor }}
+                                      aria-label={`${hotel.brand} brand color`}
+                                    />
+                                  </div>
+                                ) : null}
                               </div>
                             </div>
                           );
                         })
                       )}
+                      </div>
                     </div>
                   </section>
                 );
@@ -836,7 +960,7 @@ export function HyattTierListClient({
             <aside className="tier-shell rounded-[24px] bg-white/74 p-4">
               <button
                 type="button"
-                onClick={() => setIsBrandPaletteOpen(true)}
+                onClick={() => setIsExploredBrandsOpen(true)}
                 className="section-label transition hover:text-[rgb(var(--wine))]"
               >
                 Brands Explored
@@ -844,20 +968,26 @@ export function HyattTierListClient({
               <div className="mt-3 flex flex-wrap gap-2.5 xl:flex-col xl:gap-2">
                 {mappedBrands.length ? (
                   mappedBrands.map((brand) => (
+                    (() => {
+                      const brandStyle = getBrandVisualStyle(brand.name, brand.color);
+
+                      return (
                     <button
                       key={brand.name}
                       type="button"
                       onClick={() => setSelectedBrandName(brand.name)}
                       className="inline-flex w-full items-start justify-start gap-2 rounded-full border px-3 py-2 text-left text-[0.65rem] font-semibold uppercase tracking-[0.1em] shadow-[0_10px_22px_rgba(26,74,122,0.06)] sm:text-xs sm:tracking-[0.12em]"
                       style={{
-                        borderColor: `${brand.color}33`,
-                        backgroundColor: `${brand.color}14`,
-                        color: brand.color
+                        borderColor: brandStyle.borderColor,
+                        background: brandStyle.background,
+                        color: brandStyle.labelColor,
+                        boxShadow: `0 10px 22px ${brandStyle.shadowColor}`
                       }}
                     >
-                      <span className="mt-0.5 h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: brand.color }} />
+                      <span className="mt-0.5 h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: brandStyle.dotColor }} />
                       {brand.name}
                     </button>
+                    );})()
                   ))
                 ) : (
                   <div className="rounded-[18px] border border-dashed border-[rgba(0,102,179,0.16)] bg-white/55 p-4 text-sm text-[rgba(34,58,86,0.58)]">
@@ -874,13 +1004,17 @@ export function HyattTierListClient({
             <div>
               <p className="section-label">Planned Hotel Explorations</p>
             </div>
-            <div className="rounded-full border border-white/80 bg-white/75 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-[rgba(34,58,86,0.58)]">
-              {futureHotels.length} planned hotel exploration{futureHotels.length === 1 ? '' : 's'}
-            </div>
+            {!isCompactMode ? (
+              <div className="rounded-full border border-white/80 bg-white/75 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-[rgba(34,58,86,0.58)]">
+                {futureHotels.length} planned hotel exploration{futureHotels.length === 1 ? '' : 's'}
+              </div>
+            ) : null}
           </div>
 
           <div
-            className="mt-4 rounded-[24px] border border-dashed border-[rgba(0,102,179,0.14)] bg-white/40 p-3 sm:p-4"
+            className={`mt-4 rounded-[24px] border border-dashed border-[rgba(0,102,179,0.14)] ${
+              isCompactMode ? 'bg-white/78 p-2.5 sm:p-3' : 'bg-white/40 p-3 sm:p-4'
+            }`}
             onDragOver={(event) => {
               if (!draggedHotel || draggedHotel.stayType !== 'FUTURE') {
                 return;
@@ -903,10 +1037,11 @@ export function HyattTierListClient({
               outlineOffset: '3px'
             }}
           >
-            <div className="mt-3 grid gap-2.5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
+            <div className={isCompactMode ? 'flex min-h-[72px] flex-wrap content-start gap-1.5 sm:min-h-[80px]' : 'mt-3 grid gap-2.5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5'}>
               {futureHotels.length ? (
                 futureHotels.map((hotel) => {
                   const brandColor = BRAND_BY_NAME[hotel.brand]?.color || '#7A1F2C';
+                  const brandStyle = getBrandVisualStyle(hotel.brand, brandColor);
 
                   return (
                     <div
@@ -935,36 +1070,46 @@ export function HyattTierListClient({
                       }}
                       role="button"
                       tabIndex={0}
-                      className="group rounded-[18px] border-2 p-3 text-left transition hover:-translate-y-0.5 hover:shadow-[0_14px_26px_rgba(26,74,122,0.11)]"
+                      className={`group border-2 text-left transition hover:-translate-y-0.5 hover:shadow-[0_14px_26px_rgba(26,74,122,0.11)] ${
+                        isCompactMode ? 'rounded-[10px] px-2.5 py-1.5' : 'rounded-[18px] p-3'
+                      }`}
                       style={{
-                        borderColor: dropTarget?.stayType === 'FUTURE' && dropTarget.beforeHotelId === hotel.id ? `${brandColor}BB` : `${brandColor}70`,
-                        background: `linear-gradient(135deg, ${brandColor}14 0%, rgba(255,255,255,0.94) 48%, rgba(255,255,255,0.88) 100%)`,
-                        boxShadow: `inset 0 1px 0 rgba(255,255,255,0.8), 0 14px 30px ${brandColor}10`,
+                        borderColor: dropTarget?.stayType === 'FUTURE' && dropTarget.beforeHotelId === hotel.id ? `${brandColor}BB` : brandStyle.borderColor,
+                        background: isCompactMode
+                          ? `linear-gradient(135deg, ${rgba(brandStyle.dotColor, 0.16)} 0%, rgba(255,255,255,0.96) 70%)`
+                          : brandStyle.background,
+                        boxShadow: `inset 0 1px 0 rgba(255,255,255,0.8), 0 14px 30px ${brandStyle.shadowColor}`,
                         opacity: draggedHotelId === hotel.id ? 0.55 : 1,
                         cursor: draggedHotelId === hotel.id ? 'grabbing' : 'grab'
                       }}
                     >
-                      <div className="flex items-start justify-between gap-3">
+                      <div className={`flex ${isCompactMode ? 'items-center justify-start' : 'items-start justify-between'} gap-3`}>
                         <div>
-                          <div className="line-clamp-2 text-sm font-semibold leading-5 text-[rgb(var(--page-foreground))] transition group-hover:text-[rgb(var(--wine))] sm:text-base">
+                          <div className={`text-[rgb(var(--page-foreground))] transition group-hover:text-[rgb(var(--wine))] ${
+                            isCompactMode
+                              ? 'whitespace-nowrap text-[0.72rem] font-semibold leading-none sm:text-xs'
+                              : 'line-clamp-2 text-sm font-semibold leading-5 sm:text-base'
+                          }`}>
                             {hotel.name}
                           </div>
                         </div>
-                        <div className="mt-0.5 flex shrink-0 items-center gap-1.5">
-                          {hotel.roomEntries.length > 0 ? (
+                        {!isCompactMode ? (
+                          <div className="mt-0.5 flex shrink-0 items-center gap-1.5">
+                            {hotel.roomEntries.length > 0 ? (
+                              <span
+                                className="inline-flex h-5 min-w-5 items-center justify-center rounded-full border border-[rgba(34,58,86,0.12)] bg-[rgba(34,58,86,0.08)] px-1 text-[0.625rem] font-semibold leading-none text-[rgba(34,58,86,0.72)]"
+                                aria-label={`${hotel.roomEntries.length} logged room${hotel.roomEntries.length === 1 ? '' : 's'}`}
+                              >
+                                {hotel.roomEntries.length}
+                              </span>
+                            ) : null}
                             <span
-                              className="inline-flex h-5 min-w-5 items-center justify-center rounded-full border border-[rgba(34,58,86,0.12)] bg-[rgba(34,58,86,0.08)] px-1 text-[0.625rem] font-semibold leading-none text-[rgba(34,58,86,0.72)]"
-                              aria-label={`${hotel.roomEntries.length} logged room${hotel.roomEntries.length === 1 ? '' : 's'}`}
-                            >
-                              {hotel.roomEntries.length}
-                            </span>
-                          ) : null}
-                          <span
-                            className="h-5 w-5 rounded-full border border-white/80 shadow-[inset_0_1px_0_rgba(255,255,255,0.5)]"
-                            style={{ backgroundColor: brandColor }}
-                            aria-label={`${hotel.brand} brand color`}
-                          />
-                        </div>
+                              className="h-5 w-5 rounded-full border border-white/80 shadow-[inset_0_1px_0_rgba(255,255,255,0.5)]"
+                              style={{ backgroundColor: brandStyle.dotColor }}
+                              aria-label={`${hotel.brand} brand color`}
+                            />
+                          </div>
+                        ) : null}
                       </div>
                     </div>
                   );
@@ -1061,7 +1206,67 @@ export function HyattTierListClient({
         </div>
       ) : null}
 
-      {isBrandPaletteOpen ? (
+      {isAllBrandsOpen ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-[rgba(42,18,22,0.48)] px-4 py-8 backdrop-blur-sm">
+          <div className="glass-panel w-full max-w-4xl rounded-[30px] p-5 sm:p-7">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="section-label">Brand Palette</p>
+                <h2 className="mt-2 text-2xl font-semibold leading-none text-[rgb(var(--page-foreground))] font-[family:var(--font-display)] sm:text-4xl">
+                  Hyatt brands and colors
+                </h2>
+                <div className="mt-2 text-sm text-[rgba(34,58,86,0.62)]">
+                  All 38 brands in their full brand color.
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setIsAllBrandsOpen(false)}
+                className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-[rgba(118,31,47,0.16)] bg-white/80 text-lg text-[rgb(var(--wine))] transition hover:bg-[rgba(118,31,47,0.06)]"
+                aria-label="Close all brands"
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="mt-6 max-h-[70vh] overflow-auto pr-1">
+              <div className="space-y-5">
+                {BRANDS_BY_SEGMENT.map(({ segment, brands }) => (
+                  <div key={segment} className="rounded-[24px] border border-[rgba(118,31,47,0.1)] bg-white/60 p-4">
+                    <div className="mb-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-[rgba(64,35,37,0.48)]">
+                      {segment}
+                    </div>
+                    <div className="flex flex-wrap gap-2.5">
+                      {brands.map((brand) => (
+                        (() => {
+                          const brandStyle = getBrandVisualStyle(brand.name, brand.color);
+
+                          return (
+                        <div
+                          key={brand.name}
+                          className="rounded-full border px-3 py-2 text-xs font-semibold shadow-[0_10px_22px_rgba(81,39,43,0.08)]"
+                          style={{
+                            borderColor: brandStyle.borderColor,
+                            background: brandStyle.background,
+                            color: brandStyle.labelColor,
+                            boxShadow: `0 10px 22px ${brandStyle.shadowColor}`
+                          }}
+                        >
+                          {brand.name}
+                        </div>
+                        );})()
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {isExploredBrandsOpen ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-[rgba(42,18,22,0.48)] px-4 py-8 backdrop-blur-sm">
           <div className="glass-panel w-full max-w-4xl rounded-[30px] p-5 sm:p-7">
             <div className="flex items-start justify-between gap-4">
@@ -1077,9 +1282,9 @@ export function HyattTierListClient({
 
               <button
                 type="button"
-                onClick={() => setIsBrandPaletteOpen(false)}
+                onClick={() => setIsExploredBrandsOpen(false)}
                 className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-[rgba(118,31,47,0.16)] bg-white/80 text-lg text-[rgb(var(--wine))] transition hover:bg-[rgba(118,31,47,0.06)]"
-                aria-label="Close brand palette"
+                aria-label="Close explored brands"
               >
                 ×
               </button>
@@ -1095,6 +1300,7 @@ export function HyattTierListClient({
                     <div className="flex flex-wrap gap-2.5">
                       {brands.map((brand) => {
                         const isExplored = exploredBrandNames.has(brand.name);
+                        const brandStyle = getBrandVisualStyle(brand.name, brand.color);
 
                         return (
                         <button
@@ -1102,16 +1308,17 @@ export function HyattTierListClient({
                           type="button"
                           onClick={() => {
                             if (isExplored) {
-                              setIsBrandPaletteOpen(false);
+                              setIsExploredBrandsOpen(false);
                               setSelectedBrandName(brand.name);
                             }
                           }}
                           disabled={!isExplored}
                           className="rounded-full border px-3 py-2 text-xs font-semibold shadow-[0_10px_22px_rgba(81,39,43,0.08)] transition disabled:cursor-default disabled:shadow-none"
                           style={{
-                            borderColor: isExplored ? `${brand.color}55` : 'rgba(148,163,184,0.22)',
-                            backgroundColor: isExplored ? `${brand.color}18` : 'rgba(148,163,184,0.12)',
-                            color: isExplored ? brand.color : '#94A3B8'
+                            borderColor: isExplored ? brandStyle.borderColor : 'rgba(148,163,184,0.22)',
+                            background: isExplored ? brandStyle.background : 'rgba(148,163,184,0.12)',
+                            color: isExplored ? brandStyle.labelColor : '#94A3B8',
+                            boxShadow: isExplored ? `0 10px 22px ${brandStyle.shadowColor}` : 'none'
                           }}
                         >
                           {brand.name}

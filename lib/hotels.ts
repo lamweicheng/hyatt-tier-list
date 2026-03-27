@@ -128,8 +128,6 @@ export async function reorderHotels(payload: unknown) {
       })
     )
   );
-
-  return listHotels();
 }
 
 export function normalizeRouteError(error: unknown) {
