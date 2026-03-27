@@ -352,6 +352,7 @@ export function HyattTierListClient({
     () => (selectedBrandName ? BRAND_BY_NAME[selectedBrandName] ?? null : null),
     [selectedBrandName]
   );
+  const exploredBrandNames = useMemo(() => new Set(exploredHotels.map((hotel) => hotel.brand)), [exploredHotels]);
   const selectedBrandHotels = useMemo(
     () => (selectedBrandName ? sortHotelsByTier(hotels.filter((hotel) => hotel.brand === selectedBrandName)) : []),
     [hotels, selectedBrandName]
@@ -674,13 +675,23 @@ export function HyattTierListClient({
               </div>
             </div>
 
-            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+            <div className="grid grid-cols-2 gap-2.5 sm:gap-3 lg:grid-cols-5">
                 {summaryCards.map((card) => (
-                  <div key={card.label} className="soft-ring rounded-[24px] bg-white/82 p-4">
-                    <div className="text-[0.72rem] uppercase tracking-[0.16em] text-[rgba(34,58,86,0.52)]">
-                      {card.label}
+                  <div key={card.label} className="soft-ring rounded-[20px] bg-white/82 p-3 sm:rounded-[24px] sm:p-4">
+                    <div className="text-[0.62rem] uppercase tracking-[0.14em] text-[rgba(34,58,86,0.52)] sm:text-[0.72rem] sm:tracking-[0.16em]">
+                      {card.label === 'Brands Explored' ? (
+                        <button
+                          type="button"
+                          onClick={() => setIsBrandPaletteOpen(true)}
+                          className="transition hover:text-[rgb(var(--wine))]"
+                        >
+                          {card.label}
+                        </button>
+                      ) : (
+                        card.label
+                      )}
                     </div>
-                    <div className="mt-2 text-2xl font-semibold text-[rgb(var(--page-foreground))] sm:text-[1.75rem]">
+                    <div className="mt-1.5 text-lg font-semibold text-[rgb(var(--page-foreground))] sm:mt-2 sm:text-[1.75rem]">
                       {card.value}
                     </div>
                   </div>
@@ -728,12 +739,12 @@ export function HyattTierListClient({
                         <div className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl text-lg font-bold ${tierStyle.badge}`}>
                           {tier}
                         </div>
-                        <div className="text-lg font-semibold text-[rgb(var(--page-foreground))]">
+                        <div className="text-base font-semibold text-[rgb(var(--page-foreground))] sm:text-lg">
                           {tier}-Tier
                         </div>
                       </div>
 
-                      <div className="rounded-full border border-white/80 bg-white/75 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-[rgba(34,58,86,0.58)]">
+                      <div className="rounded-full border border-white/80 bg-white/75 px-2.5 py-1 text-[0.65rem] font-semibold uppercase tracking-[0.14em] text-[rgba(34,58,86,0.58)] sm:px-3 sm:text-xs sm:tracking-[0.18em]">
                         {tierHotels.length} hotel{tierHotels.length === 1 ? '' : 's'}
                       </div>
                     </div>
@@ -775,14 +786,15 @@ export function HyattTierListClient({
                               aria-grabbed={draggedHotelId === hotel.id}
                               role="button"
                               tabIndex={0}
-                              className="group rounded-[18px] border bg-white/82 p-3 text-left transition hover:-translate-y-0.5 hover:shadow-[0_14px_26px_rgba(26,74,122,0.11)]"
+                              className="group rounded-[18px] border-2 p-3 text-left transition hover:-translate-y-0.5 hover:shadow-[0_14px_26px_rgba(26,74,122,0.11)]"
                               style={{
                                 borderColor:
                                   dropTarget?.stayType === 'EXPLORED' &&
                                   dropTarget.tier === tier &&
                                   dropTarget.beforeHotelId === hotel.id
-                                    ? `${brandColor}66`
-                                    : `${brandColor}28`,
+                                    ? `${brandColor}BB`
+                                    : `${brandColor}70`,
+                                background: `linear-gradient(135deg, ${brandColor}14 0%, rgba(255,255,255,0.94) 48%, rgba(255,255,255,0.88) 100%)`,
                                 boxShadow: `inset 0 1px 0 rgba(255,255,255,0.8), 0 14px 30px ${brandColor}10`,
                                 opacity: draggedHotelId === hotel.id ? 0.55 : 1,
                                 cursor: draggedHotelId === hotel.id ? 'grabbing' : 'grab'
@@ -790,7 +802,7 @@ export function HyattTierListClient({
                             >
                               <div className="flex items-start justify-between gap-3">
                                 <div>
-                                  <div className="line-clamp-2 text-base font-semibold leading-5 text-[rgb(var(--page-foreground))] transition group-hover:text-[rgb(var(--wine))]">
+                                  <div className="line-clamp-2 text-sm font-semibold leading-5 text-[rgb(var(--page-foreground))] transition group-hover:text-[rgb(var(--wine))] sm:text-base">
                                     {hotel.name}
                                   </div>
                                 </div>
@@ -822,7 +834,13 @@ export function HyattTierListClient({
             </div>
 
             <aside className="tier-shell rounded-[24px] bg-white/74 p-4">
-              <div className="section-label">Brands Explored</div>
+              <button
+                type="button"
+                onClick={() => setIsBrandPaletteOpen(true)}
+                className="section-label transition hover:text-[rgb(var(--wine))]"
+              >
+                Brands Explored
+              </button>
               <div className="mt-3 flex flex-wrap gap-2.5 xl:flex-col xl:gap-2">
                 {mappedBrands.length ? (
                   mappedBrands.map((brand) => (
@@ -830,7 +848,7 @@ export function HyattTierListClient({
                       key={brand.name}
                       type="button"
                       onClick={() => setSelectedBrandName(brand.name)}
-                      className="inline-flex w-full items-start justify-start gap-2 rounded-full border px-3 py-2 text-left text-xs font-semibold uppercase tracking-[0.12em] shadow-[0_10px_22px_rgba(26,74,122,0.06)]"
+                      className="inline-flex w-full items-start justify-start gap-2 rounded-full border px-3 py-2 text-left text-[0.65rem] font-semibold uppercase tracking-[0.1em] shadow-[0_10px_22px_rgba(26,74,122,0.06)] sm:text-xs sm:tracking-[0.12em]"
                       style={{
                         borderColor: `${brand.color}33`,
                         backgroundColor: `${brand.color}14`,
@@ -917,9 +935,10 @@ export function HyattTierListClient({
                       }}
                       role="button"
                       tabIndex={0}
-                      className="group rounded-[18px] border bg-white/84 p-3 text-left transition hover:-translate-y-0.5 hover:shadow-[0_14px_26px_rgba(26,74,122,0.11)]"
+                      className="group rounded-[18px] border-2 p-3 text-left transition hover:-translate-y-0.5 hover:shadow-[0_14px_26px_rgba(26,74,122,0.11)]"
                       style={{
-                        borderColor: dropTarget?.stayType === 'FUTURE' && dropTarget.beforeHotelId === hotel.id ? `${brandColor}66` : `${brandColor}28`,
+                        borderColor: dropTarget?.stayType === 'FUTURE' && dropTarget.beforeHotelId === hotel.id ? `${brandColor}BB` : `${brandColor}70`,
+                        background: `linear-gradient(135deg, ${brandColor}14 0%, rgba(255,255,255,0.94) 48%, rgba(255,255,255,0.88) 100%)`,
                         boxShadow: `inset 0 1px 0 rgba(255,255,255,0.8), 0 14px 30px ${brandColor}10`,
                         opacity: draggedHotelId === hotel.id ? 0.55 : 1,
                         cursor: draggedHotelId === hotel.id ? 'grabbing' : 'grab'
@@ -927,7 +946,7 @@ export function HyattTierListClient({
                     >
                       <div className="flex items-start justify-between gap-3">
                         <div>
-                          <div className="line-clamp-2 text-base font-semibold leading-5 text-[rgb(var(--page-foreground))] transition group-hover:text-[rgb(var(--wine))]">
+                          <div className="line-clamp-2 text-sm font-semibold leading-5 text-[rgb(var(--page-foreground))] transition group-hover:text-[rgb(var(--wine))] sm:text-base">
                             {hotel.name}
                           </div>
                         </div>
@@ -1047,10 +1066,13 @@ export function HyattTierListClient({
           <div className="glass-panel w-full max-w-4xl rounded-[30px] p-5 sm:p-7">
             <div className="flex items-start justify-between gap-4">
               <div>
-                <p className="section-label">Brand Palette</p>
-                <h2 className="mt-2 text-3xl font-semibold leading-none text-[rgb(var(--page-foreground))] font-[family:var(--font-display)] sm:text-4xl">
-                  Hyatt brands and colors
+                <p className="section-label">Brands Explored</p>
+                <h2 className="mt-2 text-2xl font-semibold leading-none text-[rgb(var(--page-foreground))] font-[family:var(--font-display)] sm:text-4xl">
+                  All Hyatt brands
                 </h2>
+                <div className="mt-2 text-sm text-[rgba(34,58,86,0.62)]">
+                  Explored brands keep their color. Everything else stays grey.
+                </div>
               </div>
 
               <button
@@ -1071,19 +1093,30 @@ export function HyattTierListClient({
                       {segment}
                     </div>
                     <div className="flex flex-wrap gap-2.5">
-                      {brands.map((brand) => (
-                        <div
+                      {brands.map((brand) => {
+                        const isExplored = exploredBrandNames.has(brand.name);
+
+                        return (
+                        <button
                           key={brand.name}
-                          className="rounded-full border px-3 py-2 text-xs font-semibold shadow-[0_10px_22px_rgba(81,39,43,0.08)]"
+                          type="button"
+                          onClick={() => {
+                            if (isExplored) {
+                              setIsBrandPaletteOpen(false);
+                              setSelectedBrandName(brand.name);
+                            }
+                          }}
+                          disabled={!isExplored}
+                          className="rounded-full border px-3 py-2 text-xs font-semibold shadow-[0_10px_22px_rgba(81,39,43,0.08)] transition disabled:cursor-default disabled:shadow-none"
                           style={{
-                            borderColor: `${brand.color}33`,
-                            backgroundColor: `${brand.color}14`,
-                            color: brand.color
+                            borderColor: isExplored ? `${brand.color}55` : 'rgba(148,163,184,0.22)',
+                            backgroundColor: isExplored ? `${brand.color}18` : 'rgba(148,163,184,0.12)',
+                            color: isExplored ? brand.color : '#94A3B8'
                           }}
                         >
                           {brand.name}
-                        </div>
-                      ))}
+                        </button>
+                      );})}
                     </div>
                   </div>
                 ))}
