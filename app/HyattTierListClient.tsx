@@ -14,6 +14,7 @@ import type {
 } from '@/lib/types';
 
 const LOCAL_STORAGE_KEY = 'hyatt-tier-list.hotels';
+const TOP_PICKS_STORAGE_KEY = 'hyatt-tier-list.top-picks';
 
 const DEFAULT_DRAFT: HotelDraft = {
   name: '',
@@ -102,6 +103,20 @@ type BrandVisualStyle = {
   dotColor: string;
   shadowColor: string;
 };
+
+type TopPickRank = 1 | 2 | 3;
+
+type TopPickSlot = {
+  rank: TopPickRank;
+  hotelId: string;
+  imageUrl: string;
+};
+
+const DEFAULT_TOP_PICKS: TopPickSlot[] = [
+  { rank: 1, hotelId: '', imageUrl: '' },
+  { rank: 2, hotelId: '', imageUrl: '' },
+  { rank: 3, hotelId: '', imageUrl: '' }
+];
 
 function isTier(value: unknown): value is Tier {
   return TIERS.includes(value as Tier);
@@ -300,6 +315,35 @@ function formatRoomEntries(entries: RoomEntry[]) {
   return entries.map((entry) => entry.label).join(', ');
 }
 
+function normalizeTopPickSlots(value: unknown): TopPickSlot[] {
+  if (!Array.isArray(value)) {
+    return DEFAULT_TOP_PICKS;
+  }
+
+  const byRank = new Map<TopPickRank, TopPickSlot>();
+
+  value.forEach((entry) => {
+    if (typeof entry !== 'object' || entry === null) {
+      return;
+    }
+
+    const record = entry as Record<string, unknown>;
+    const rank = record.rank;
+
+    if (rank !== 1 && rank !== 2 && rank !== 3) {
+      return;
+    }
+
+    byRank.set(rank, {
+      rank,
+      hotelId: typeof record.hotelId === 'string' ? record.hotelId : '',
+      imageUrl: typeof record.imageUrl === 'string' ? record.imageUrl : ''
+    });
+  });
+
+  return DEFAULT_TOP_PICKS.map((slot) => byRank.get(slot.rank) ?? slot);
+}
+
 function hexToRgb(hex: string) {
   const sanitized = hex.replace('#', '');
   const normalized = sanitized.length === 3
@@ -372,8 +416,14 @@ export function HyattTierListClient({
   const [isCompactMode, setIsCompactMode] = useState(false);
   const [isAllBrandsOpen, setIsAllBrandsOpen] = useState(false);
   const [isExploredBrandsOpen, setIsExploredBrandsOpen] = useState(false);
+  const [isFutureBrandsOpen, setIsFutureBrandsOpen] = useState(false);
+  const [isSuitesOpen, setIsSuitesOpen] = useState(false);
+  const [isTopPicksOpen, setIsTopPicksOpen] = useState(false);
   const [selectedBrandName, setSelectedBrandName] = useState<string | null>(null);
   const reorderRequestIdRef = useRef(0);
+  const [topPicks, setTopPicks] = useState<TopPickSlot[]>(DEFAULT_TOP_PICKS);
+  const [topPicksDraft, setTopPicksDraft] = useState<TopPickSlot[]>(DEFAULT_TOP_PICKS);
+  const [topPicksError, setTopPicksError] = useState<string | null>(null);
 
   useEffect(() => {
     setIsHydrated(true);
@@ -394,6 +444,19 @@ export function HyattTierListClient({
     } catch {
       window.localStorage.removeItem(LOCAL_STORAGE_KEY);
     }
+
+    const storedTopPicks = window.localStorage.getItem(TOP_PICKS_STORAGE_KEY);
+
+    if (storedTopPicks) {
+      try {
+        const parsedTopPicks = JSON.parse(storedTopPicks) as unknown;
+        const normalizedTopPicks = normalizeTopPickSlots(parsedTopPicks);
+        setTopPicks(normalizedTopPicks);
+        setTopPicksDraft(normalizedTopPicks);
+      } catch {
+        window.localStorage.removeItem(TOP_PICKS_STORAGE_KEY);
+      }
+    }
   }, [persistenceMode]);
 
   useEffect(() => {
@@ -403,6 +466,14 @@ export function HyattTierListClient({
 
     window.localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(hotels));
   }, [hotels, isHydrated, persistenceMode]);
+
+  useEffect(() => {
+    if (!isHydrated) {
+      return;
+    }
+
+    window.localStorage.setItem(TOP_PICKS_STORAGE_KEY, JSON.stringify(topPicks));
+  }, [isHydrated, topPicks]);
 
   const exploredHotels = useMemo(
     () => sortHotelsByTier(hotels.filter((hotel) => hotel.stayType === 'EXPLORED')),
@@ -438,10 +509,35 @@ export function HyattTierListClient({
     [selectedBrandName]
   );
   const exploredBrandNames = useMemo(() => new Set(exploredHotels.map((hotel) => hotel.brand)), [exploredHotels]);
+  const futureExploringBrands = useMemo(
+    () => HYATT_BRANDS.filter((brand) => futureHotels.some((hotel) => hotel.brand === brand.name) && !exploredBrandNames.has(brand.name)),
+    [exploredBrandNames, futureHotels]
+  );
+  const exploredSuites = useMemo(
+    () =>
+      exploredHotels.flatMap((hotel) =>
+        hotel.roomEntries
+          .filter((entry) => entry.kind === 'SUITE')
+          .map((entry) => ({ hotelName: hotel.name, brand: hotel.brand, suiteName: entry.label, tier: hotel.tier }))
+      ),
+    [exploredHotels]
+  );
   const selectedBrandHotels = useMemo(
     () => (selectedBrandName ? sortHotelsByTier(hotels.filter((hotel) => hotel.brand === selectedBrandName)) : []),
     [hotels, selectedBrandName]
   );
+  const topPicksResolved = useMemo(
+    () =>
+      topPicks
+        .map((slot) => ({
+          ...slot,
+          hotel: exploredHotels.find((hotel) => hotel.id === slot.hotelId) ?? null
+        }))
+        .filter((slot) => slot.hotel)
+        .sort((left, right) => left.rank - right.rank),
+    [exploredHotels, topPicks]
+  );
+  const hasCompleteTopPicks = topPicksResolved.length === 3 && topPicks.every((slot) => slot.hotelId);
   const draggedHotel = useMemo(
     () => hotels.find((hotel) => hotel.id === draggedHotelId) ?? null,
     [draggedHotelId, hotels]
@@ -458,10 +554,44 @@ export function HyattTierListClient({
     }
   ];
 
+  useEffect(() => {
+    setTopPicks((current) =>
+      current.map((slot) =>
+        exploredHotels.some((hotel) => hotel.id === slot.hotelId)
+          ? slot
+          : { ...slot, hotelId: '', imageUrl: '' }
+      )
+    );
+  }, [exploredHotels]);
+
   function closeModal() {
     setModalState(null);
     setDraft(DEFAULT_DRAFT);
     setErrorMessage(null);
+  }
+
+  function openTopPicksModal() {
+    setTopPicksDraft(topPicks);
+    setTopPicksError(null);
+    setIsTopPicksOpen(true);
+  }
+
+  function handleSaveTopPicks() {
+    const selectedHotelIds = topPicksDraft.map((slot) => slot.hotelId).filter(Boolean);
+
+    if (selectedHotelIds.length !== new Set(selectedHotelIds).size) {
+      setTopPicksError('Each top pick must be a different hotel.');
+      return;
+    }
+
+    setTopPicks(
+      topPicksDraft.map((slot) => ({
+        ...slot,
+        imageUrl: slot.imageUrl.trim()
+      }))
+    );
+    setTopPicksError(null);
+    setIsTopPicksOpen(false);
   }
 
   function openCreateModal() {
@@ -778,6 +908,22 @@ export function HyattTierListClient({
                         >
                           {card.label}
                         </button>
+                      ) : card.label === 'Suites Explored' ? (
+                        <button
+                          type="button"
+                          onClick={() => setIsSuitesOpen(true)}
+                          className="text-[0.62rem] uppercase tracking-[0.14em] text-[rgba(34,58,86,0.52)] transition hover:text-[rgb(var(--wine))] sm:text-[0.72rem] sm:tracking-[0.16em]"
+                        >
+                          {card.label}
+                        </button>
+                      ) : card.label === 'Planned Brand Explorations' ? (
+                        <button
+                          type="button"
+                          onClick={() => setIsFutureBrandsOpen(true)}
+                          className="text-[0.62rem] uppercase tracking-[0.14em] text-[rgba(34,58,86,0.52)] transition hover:text-[rgb(var(--wine))] sm:text-[0.72rem] sm:tracking-[0.16em]"
+                        >
+                          {card.label}
+                        </button>
                       ) : (
                         card.label
                       )}
@@ -789,6 +935,78 @@ export function HyattTierListClient({
                 ))}
             </div>
           </div>
+        </section>
+
+        <section className="glass-panel rounded-[28px] px-4 py-4 sm:px-5 sm:py-5">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <button
+                type="button"
+                onClick={openTopPicksModal}
+                className="section-label transition hover:text-[rgb(var(--wine))]"
+              >
+                Top 3 Hotels
+              </button>
+              <h2 className="mt-2 text-2xl font-semibold text-[rgb(var(--page-foreground))] font-[family:var(--font-display)] sm:text-3xl">
+                My Personal Podium
+              </h2>
+            </div>
+          </div>
+
+          {hasCompleteTopPicks ? (
+            <div className="mt-5 grid gap-4 lg:grid-cols-3">
+              {topPicksResolved.map((slot) => {
+                const hotel = slot.hotel;
+
+                if (!hotel) {
+                  return null;
+                }
+
+                const brand = BRAND_BY_NAME[hotel.brand];
+                const brandColor = brand?.color ?? '#1D4ED8';
+
+                return (
+                  <article
+                    key={`${slot.rank}-${hotel.id}`}
+                    className="relative overflow-hidden rounded-[28px] border border-white/50 bg-[rgba(255,255,255,0.82)] shadow-[0_20px_60px_rgba(26,74,122,0.16)]"
+                  >
+                    <div className="relative h-48 sm:h-52">
+                      {slot.imageUrl ? (
+                        <img
+                          src={slot.imageUrl}
+                          alt={hotel.name}
+                          className="h-full w-full object-cover"
+                        />
+                      ) : (
+                        <div
+                          className="h-full w-full"
+                          style={{
+                            background: `radial-gradient(circle at top left, ${brandColor}66, transparent 34%), linear-gradient(135deg, ${brandColor}26, rgba(18,42,68,0.18))`
+                          }}
+                        />
+                      )}
+                      <div className="absolute inset-0 bg-gradient-to-t from-[rgba(12,24,40,0.82)] via-[rgba(12,24,40,0.24)] to-transparent" />
+                      <div className="absolute left-4 top-4 rounded-full border border-white/70 bg-[rgba(255,255,255,0.78)] px-3 py-1 text-xs font-semibold uppercase tracking-[0.14em] text-[rgb(var(--wine))] shadow-[0_10px_24px_rgba(12,24,40,0.18)] backdrop-blur-md">
+                        No. {slot.rank}
+                      </div>
+                      <div className="absolute bottom-4 left-4 right-4">
+                        <div className="text-xs font-semibold uppercase tracking-[0.14em] text-white/78">
+                          {hotel.brand}
+                        </div>
+                        <div className="mt-2 text-2xl font-semibold leading-tight text-white">
+                          {hotel.name}
+                        </div>
+                      </div>
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="mt-5 rounded-[22px] border border-dashed border-[rgba(0,102,179,0.16)] bg-white/58 p-5 text-sm text-[rgba(34,58,86,0.62)]">
+              Click Top 3 Hotels to set up your personal podium.
+            </div>
+          )}
         </section>
 
         <section className="glass-panel rounded-[28px] px-4 py-4 sm:px-5 sm:py-5">
@@ -861,7 +1079,7 @@ export function HyattTierListClient({
                         ) : null}
                       </div>
 
-                      <div className={isCompactMode ? 'mt-2 flex min-h-[72px] flex-wrap content-start gap-1.5 md:mt-0 sm:min-h-[80px]' : 'mt-3 grid gap-2.5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5'}>
+                      <div className={isCompactMode ? 'mt-2 flex min-h-[72px] flex-wrap content-start gap-1.5 md:mt-0 sm:min-h-[80px]' : 'mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5'}>
                       {tierHotels.length === 0 ? (
                         <div className="rounded-[18px] border border-dashed border-[rgba(0,102,179,0.16)] bg-white/55 p-4 text-sm text-[rgba(34,58,86,0.58)]">
                           {tierStyle.empty}
@@ -900,7 +1118,7 @@ export function HyattTierListClient({
                               role="button"
                               tabIndex={0}
                               className={`group border-2 text-left transition hover:-translate-y-0.5 hover:shadow-[0_14px_26px_rgba(26,74,122,0.11)] ${
-                                isCompactMode ? 'rounded-[10px] px-2.5 py-1.5' : 'rounded-[18px] p-3'
+                                isCompactMode ? 'rounded-[10px] px-2.5 py-1.5' : 'min-h-[68px] rounded-[16px] px-3 py-2.5 sm:min-h-[72px]'
                               }`}
                               style={{
                                 borderColor:
@@ -917,12 +1135,12 @@ export function HyattTierListClient({
                                 cursor: draggedHotelId === hotel.id ? 'grabbing' : 'grab'
                               }}
                             >
-                              <div className={`flex ${isCompactMode ? 'items-center justify-start' : 'items-start justify-between'} gap-3`}>
+                              <div className={`flex ${isCompactMode ? 'items-center justify-start' : 'items-start justify-between'} gap-2.5`}>
                                 <div>
                                   <div className={`text-[rgb(var(--page-foreground))] transition group-hover:text-[rgb(var(--wine))] ${
                                     isCompactMode
                                       ? 'whitespace-nowrap text-[0.72rem] font-semibold leading-none sm:text-xs'
-                                      : 'line-clamp-2 text-sm font-semibold leading-5 sm:text-base'
+                                      : 'line-clamp-2 text-[0.94rem] font-semibold leading-[1.3] sm:text-[0.98rem]'
                                   }`}>
                                     {hotel.name}
                                   </div>
@@ -932,14 +1150,14 @@ export function HyattTierListClient({
                                   <div className="mt-0.5 flex shrink-0 items-center gap-1.5">
                                     {hotel.roomEntries.length > 0 ? (
                                       <span
-                                        className="inline-flex h-5 min-w-5 items-center justify-center rounded-full border border-[rgba(34,58,86,0.12)] bg-[rgba(34,58,86,0.08)] px-1 text-[0.625rem] font-semibold leading-none text-[rgba(34,58,86,0.72)]"
+                                        className="inline-flex h-4.5 min-w-4.5 items-center justify-center rounded-full border border-[rgba(34,58,86,0.12)] bg-[rgba(34,58,86,0.08)] px-1 text-[0.55rem] font-semibold leading-none text-[rgba(34,58,86,0.72)]"
                                         aria-label={`${hotel.roomEntries.length} logged room${hotel.roomEntries.length === 1 ? '' : 's'}`}
                                       >
                                         {hotel.roomEntries.length}
                                       </span>
                                     ) : null}
                                     <span
-                                      className="h-5 w-5 rounded-full border border-white/80 shadow-[inset_0_1px_0_rgba(255,255,255,0.5)]"
+                                      className="h-4.5 w-4.5 rounded-full border border-white/80 shadow-[inset_0_1px_0_rgba(255,255,255,0.5)]"
                                       style={{ backgroundColor: brandStyle.dotColor }}
                                       aria-label={`${hotel.brand} brand color`}
                                     />
@@ -1037,7 +1255,7 @@ export function HyattTierListClient({
               outlineOffset: '3px'
             }}
           >
-            <div className={isCompactMode ? 'flex min-h-[72px] flex-wrap content-start gap-1.5 sm:min-h-[80px]' : 'mt-3 grid gap-2.5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5'}>
+            <div className={isCompactMode ? 'flex min-h-[72px] flex-wrap content-start gap-1.5 sm:min-h-[80px]' : 'mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5'}>
               {futureHotels.length ? (
                 futureHotels.map((hotel) => {
                   const brandColor = BRAND_BY_NAME[hotel.brand]?.color || '#7A1F2C';
@@ -1071,7 +1289,7 @@ export function HyattTierListClient({
                       role="button"
                       tabIndex={0}
                       className={`group border-2 text-left transition hover:-translate-y-0.5 hover:shadow-[0_14px_26px_rgba(26,74,122,0.11)] ${
-                        isCompactMode ? 'rounded-[10px] px-2.5 py-1.5' : 'rounded-[18px] p-3'
+                        isCompactMode ? 'rounded-[10px] px-2.5 py-1.5' : 'min-h-[68px] rounded-[16px] px-3 py-2.5 sm:min-h-[72px]'
                       }`}
                       style={{
                         borderColor: dropTarget?.stayType === 'FUTURE' && dropTarget.beforeHotelId === hotel.id ? `${brandColor}BB` : brandStyle.borderColor,
@@ -1083,12 +1301,12 @@ export function HyattTierListClient({
                         cursor: draggedHotelId === hotel.id ? 'grabbing' : 'grab'
                       }}
                     >
-                      <div className={`flex ${isCompactMode ? 'items-center justify-start' : 'items-start justify-between'} gap-3`}>
+                      <div className={`flex ${isCompactMode ? 'items-center justify-start' : 'items-start justify-between'} gap-2.5`}>
                         <div>
                           <div className={`text-[rgb(var(--page-foreground))] transition group-hover:text-[rgb(var(--wine))] ${
                             isCompactMode
                               ? 'whitespace-nowrap text-[0.72rem] font-semibold leading-none sm:text-xs'
-                              : 'line-clamp-2 text-sm font-semibold leading-5 sm:text-base'
+                              : 'line-clamp-2 text-[0.94rem] font-semibold leading-[1.3] sm:text-[0.98rem]'
                           }`}>
                             {hotel.name}
                           </div>
@@ -1097,14 +1315,14 @@ export function HyattTierListClient({
                           <div className="mt-0.5 flex shrink-0 items-center gap-1.5">
                             {hotel.roomEntries.length > 0 ? (
                               <span
-                                className="inline-flex h-5 min-w-5 items-center justify-center rounded-full border border-[rgba(34,58,86,0.12)] bg-[rgba(34,58,86,0.08)] px-1 text-[0.625rem] font-semibold leading-none text-[rgba(34,58,86,0.72)]"
+                                className="inline-flex h-4.5 min-w-4.5 items-center justify-center rounded-full border border-[rgba(34,58,86,0.12)] bg-[rgba(34,58,86,0.08)] px-1 text-[0.55rem] font-semibold leading-none text-[rgba(34,58,86,0.72)]"
                                 aria-label={`${hotel.roomEntries.length} logged room${hotel.roomEntries.length === 1 ? '' : 's'}`}
                               >
                                 {hotel.roomEntries.length}
                               </span>
                             ) : null}
                             <span
-                              className="h-5 w-5 rounded-full border border-white/80 shadow-[inset_0_1px_0_rgba(255,255,255,0.5)]"
+                              className="h-4.5 w-4.5 rounded-full border border-white/80 shadow-[inset_0_1px_0_rgba(255,255,255,0.5)]"
                               style={{ backgroundColor: brandStyle.dotColor }}
                               aria-label={`${hotel.brand} brand color`}
                             />
@@ -1328,6 +1546,199 @@ export function HyattTierListClient({
                   </div>
                 ))}
               </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {isFutureBrandsOpen ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-[rgba(42,18,22,0.48)] px-4 py-8 backdrop-blur-sm">
+          <div className="glass-panel w-full max-w-3xl rounded-[30px] p-5 sm:p-7">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="section-label">Planned Brand Explorations</p>
+                <h2 className="mt-2 text-2xl font-semibold leading-none text-[rgb(var(--page-foreground))] font-[family:var(--font-display)] sm:text-4xl">
+                  Future brands on deck
+                </h2>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsFutureBrandsOpen(false)}
+                className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-[rgba(118,31,47,0.16)] bg-white/80 text-lg text-[rgb(var(--wine))] transition hover:bg-[rgba(118,31,47,0.06)]"
+                aria-label="Close planned brand explorations"
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="mt-6 grid gap-3 sm:grid-cols-2">
+              {futureExploringBrands.map((brand) => {
+                const style = getBrandVisualStyle(brand.name, brand.color);
+
+                return (
+                  <div
+                    key={brand.name}
+                    className="rounded-[22px] border p-4"
+                    style={{
+                      borderColor: style.borderColor,
+                      background: style.background
+                    }}
+                  >
+                    <div className="text-sm font-semibold uppercase tracking-[0.14em]" style={{ color: style.labelColor }}>
+                      {brand.segment}
+                    </div>
+                    <div className="mt-2 text-xl font-semibold text-[rgb(var(--page-foreground))]">
+                      {brand.name}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {isSuitesOpen ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-[rgba(42,18,22,0.48)] px-4 py-8 backdrop-blur-sm">
+          <div className="glass-panel w-full max-w-3xl rounded-[30px] p-5 sm:p-7">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="section-label">Suites Explored</p>
+                <h2 className="mt-2 text-2xl font-semibold leading-none text-[rgb(var(--page-foreground))] font-[family:var(--font-display)] sm:text-4xl">
+                  Every suite you logged
+                </h2>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsSuitesOpen(false)}
+                className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-[rgba(118,31,47,0.16)] bg-white/80 text-lg text-[rgb(var(--wine))] transition hover:bg-[rgba(118,31,47,0.06)]"
+                aria-label="Close suites explored"
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="mt-6 max-h-[70vh] space-y-3 overflow-auto pr-1">
+              {exploredSuites.map((suite) => {
+                const brand = BRAND_BY_NAME[suite.brand];
+                const style = getBrandVisualStyle(suite.brand, brand?.color ?? '#1D4ED8');
+
+                return (
+                  <div
+                    key={`${suite.hotelName}-${suite.suiteName}`}
+                    className="rounded-[22px] border p-4"
+                    style={{ borderColor: style.borderColor, background: style.background }}
+                  >
+                    <div className="text-sm font-semibold uppercase tracking-[0.14em]" style={{ color: style.labelColor }}>
+                      {suite.hotelName}
+                    </div>
+                    <div className="mt-2 text-xl font-semibold text-[rgb(var(--page-foreground))]">
+                      {suite.suiteName}
+                    </div>
+                    <div className="mt-2 text-sm text-[rgba(34,58,86,0.62)]">
+                      {suite.brand} {suite.tier ? `• ${suite.tier}-Tier` : ''}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {isTopPicksOpen ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-[rgba(42,18,22,0.48)] px-4 py-8 backdrop-blur-sm">
+          <div className="glass-panel w-full max-w-3xl rounded-[30px] p-5 sm:p-7">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="section-label">Top 3 Hotels</p>
+                <h2 className="mt-2 text-2xl font-semibold leading-none text-[rgb(var(--page-foreground))] font-[family:var(--font-display)] sm:text-4xl">
+                  Build your podium
+                </h2>
+                <div className="mt-2 text-sm text-[rgba(34,58,86,0.62)]">
+                  Pick your three best explored hotels. You can also paste a photo URL if you want image cards.
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsTopPicksOpen(false)}
+                className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-[rgba(118,31,47,0.16)] bg-white/80 text-lg text-[rgb(var(--wine))] transition hover:bg-[rgba(118,31,47,0.06)]"
+                aria-label="Close top 3 hotels"
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="mt-6 space-y-4">
+              {topPicksDraft.map((slot, index) => (
+                <div key={slot.rank} className="rounded-[24px] border border-[rgba(0,102,179,0.1)] bg-white/68 p-4">
+                  <div className="mb-3 text-sm font-semibold uppercase tracking-[0.14em] text-[rgba(34,58,86,0.58)]">
+                    Rank #{slot.rank}
+                  </div>
+                  <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)]">
+                    <label className="space-y-2">
+                      <span className="text-sm font-semibold text-[rgb(var(--page-foreground))]">Hotel</span>
+                      <select
+                        value={slot.hotelId}
+                        onChange={(event) =>
+                          setTopPicksDraft((current) =>
+                            current.map((item, itemIndex) =>
+                              itemIndex === index ? { ...item, hotelId: event.target.value } : item
+                            )
+                          )
+                        }
+                        className="w-full rounded-[16px] border border-[rgba(118,31,47,0.14)] bg-white/90 px-4 py-3 text-sm text-[rgb(var(--page-foreground))] outline-none transition focus:border-[rgba(118,31,47,0.32)] focus:ring-4 focus:ring-[rgba(118,31,47,0.08)]"
+                      >
+                        <option value="">Select a hotel</option>
+                        {exploredHotels.map((hotel) => (
+                          <option key={hotel.id} value={hotel.id}>
+                            {hotel.name}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+
+                    <label className="space-y-2">
+                      <span className="text-sm font-semibold text-[rgb(var(--page-foreground))]">Photo URL</span>
+                      <input
+                        value={slot.imageUrl}
+                        onChange={(event) =>
+                          setTopPicksDraft((current) =>
+                            current.map((item, itemIndex) =>
+                              itemIndex === index ? { ...item, imageUrl: event.target.value } : item
+                            )
+                          )
+                        }
+                        placeholder="Paste an image URL"
+                        className="w-full rounded-[16px] border border-[rgba(118,31,47,0.14)] bg-white/90 px-4 py-3 text-sm text-[rgb(var(--page-foreground))] outline-none transition focus:border-[rgba(118,31,47,0.32)] focus:ring-4 focus:ring-[rgba(118,31,47,0.08)]"
+                      />
+                    </label>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {topPicksError ? (
+              <div className="mt-4 rounded-[18px] border border-[rgba(118,31,47,0.18)] bg-[rgba(118,31,47,0.06)] px-4 py-3 text-sm text-[rgb(var(--wine))]">
+                {topPicksError}
+              </div>
+            ) : null}
+
+            <div className="mt-6 flex justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setIsTopPicksOpen(false)}
+                className="rounded-full border border-[rgba(118,31,47,0.16)] bg-white/82 px-5 py-2.5 text-sm font-semibold text-[rgb(var(--page-foreground))] transition hover:bg-[rgba(118,31,47,0.06)]"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveTopPicks}
+                className="rounded-full bg-[rgb(var(--wine))] px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-[#004f8d]"
+              >
+                Save top 3
+              </button>
             </div>
           </div>
         </div>
