@@ -28,10 +28,27 @@ model Hotel {
   stayType  StayType @default(EXPLORED)
   tier      Tier?
   roomEntries Json?
+  locationCity String?
+  locationCountry String?
+  addressLine1 String?
+  postalCode String?
   position  Int      @default(0)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@index([stayType, tier, position])
   @@index([brand])
+}
+
+model DashboardPreferences {
+  id                 String   @id
+  topPicks           Json?
+  topSuites          Json?
+  topFutureStays     Json?
+  topExperiences     Json?
+  topUnderrated      Json?
+  topReturnStays     Json?
+  displayPreferences Json?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
 }

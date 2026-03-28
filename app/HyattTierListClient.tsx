@@ -1,21 +1,38 @@
 'use client';
 
+import Image from 'next/image';
 import { FormEvent, startTransition, useEffect, useMemo, useRef, useState } from 'react';
 import { BRAND_BY_NAME, BRANDS_BY_SEGMENT, HYATT_BRANDS, TIERS, sortHotelsByTier } from '@/lib/hyatt-data';
 import { FancySelect } from '@/components/ui/fancy-select';
+import { DashboardMenuModal, type DashboardMenuSection } from '@/components/DashboardMenuModal';
 import type {
+  DashboardSectionId,
+  DashboardPreferencesPatch,
+  DashboardPreferencesRecord,
+  DisplayPreferences,
   HotelDraft,
   HotelRecord,
   PersistenceMode,
   RoomEntry,
   RoomEntryKind,
   StayType,
-  Tier
+  Tier,
+  TopExperienceSlot,
+  TopFutureStaySlot,
+  TopPickRank,
+  TopPickSlot,
+  TopReturnStaySlot,
+  TopUnderratedSlot,
+  TopSuiteSlot
 } from '@/lib/types';
 
 const LOCAL_STORAGE_KEY = 'hyatt-tier-list.hotels';
 const TOP_PICKS_STORAGE_KEY = 'hyatt-tier-list.top-picks';
 const TOP_SUITES_STORAGE_KEY = 'hyatt-tier-list.top-suites';
+const TOP_FUTURE_STAYS_STORAGE_KEY = 'hyatt-tier-list.top-future-stays';
+const TOP_EXPERIENCES_STORAGE_KEY = 'hyatt-tier-list.top-experiences';
+const TOP_UNDERRATED_STORAGE_KEY = 'hyatt-tier-list.top-underrated';
+const TOP_RETURN_STAYS_STORAGE_KEY = 'hyatt-tier-list.top-return-stays';
 const DISPLAY_PREFERENCES_STORAGE_KEY = 'hyatt-tier-list.display-preferences';
 
 const DEFAULT_DRAFT: HotelDraft = {
@@ -106,28 +123,6 @@ type BrandVisualStyle = {
   shadowColor: string;
 };
 
-type TopPickRank = 1 | 2 | 3;
-
-type TopPickSlot = {
-  rank: TopPickRank;
-  hotelId: string;
-  imageUrl: string;
-};
-
-type TopSuiteSlot = {
-  rank: TopPickRank;
-  hotelId: string;
-  suiteName: string;
-  imageUrl: string;
-};
-
-type DisplayPreferences = {
-  showTopHotels: boolean;
-  showTopSuites: boolean;
-  showTierBoard: boolean;
-  showFutureHotels: boolean;
-};
-
 const DEFAULT_TOP_PICKS: TopPickSlot[] = [
   { rank: 1, hotelId: '', imageUrl: '' },
   { rank: 2, hotelId: '', imageUrl: '' },
@@ -140,12 +135,54 @@ const DEFAULT_TOP_SUITES: TopSuiteSlot[] = [
   { rank: 3, hotelId: '', suiteName: '', imageUrl: '' }
 ];
 
+const DEFAULT_TOP_FUTURE_STAYS: TopFutureStaySlot[] = [
+  { rank: 1, hotelId: '', location: '', imageUrl: '' },
+  { rank: 2, hotelId: '', location: '', imageUrl: '' },
+  { rank: 3, hotelId: '', location: '', imageUrl: '' }
+];
+
+const DEFAULT_TOP_EXPERIENCES: TopExperienceSlot[] = [
+  { rank: 1, hotelId: '', description: '', imageUrl: '' },
+  { rank: 2, hotelId: '', description: '', imageUrl: '' },
+  { rank: 3, hotelId: '', description: '', imageUrl: '' }
+];
+
+const DEFAULT_TOP_UNDERRATED: TopUnderratedSlot[] = [
+  { rank: 1, hotelId: '', imageUrl: '' },
+  { rank: 2, hotelId: '', imageUrl: '' },
+  { rank: 3, hotelId: '', imageUrl: '' }
+];
+
+const DEFAULT_TOP_RETURN_STAYS: TopReturnStaySlot[] = [
+  { rank: 1, hotelId: '', imageUrl: '' },
+  { rank: 2, hotelId: '', imageUrl: '' },
+  { rank: 3, hotelId: '', imageUrl: '' }
+];
+
+const DEFAULT_SECTION_ORDER: DashboardSectionId[] = [
+  'topHotels',
+  'topSuites',
+  'tierBoard',
+  'futureHotels',
+  'topFutureStays',
+  'topExperiences',
+  'topUnderrated',
+  'topReturnStays'
+];
+
 const DEFAULT_DISPLAY_PREFERENCES: DisplayPreferences = {
   showTopHotels: true,
   showTopSuites: true,
   showTierBoard: true,
-  showFutureHotels: true
+  showFutureHotels: true,
+  showTopFutureStays: true,
+  showTopExperiences: true,
+  showTopUnderrated: true,
+  showTopReturnStays: true,
+  sectionOrder: DEFAULT_SECTION_ORDER
 };
+
+const imageLoader = ({ src }: { src: string }) => src;
 
 function isTier(value: unknown): value is Tier {
   return TIERS.includes(value as Tier);
@@ -403,12 +440,140 @@ function normalizeTopSuiteSlots(value: unknown): TopSuiteSlot[] {
   return DEFAULT_TOP_SUITES.map((slot) => byRank.get(slot.rank) ?? slot);
 }
 
+function normalizeTopFutureStaySlots(value: unknown): TopFutureStaySlot[] {
+  if (!Array.isArray(value)) {
+    return DEFAULT_TOP_FUTURE_STAYS;
+  }
+
+  const byRank = new Map<TopPickRank, TopFutureStaySlot>();
+
+  value.forEach((entry) => {
+    if (typeof entry !== 'object' || entry === null) {
+      return;
+    }
+
+    const record = entry as Record<string, unknown>;
+    const rank = record.rank;
+
+    if (rank !== 1 && rank !== 2 && rank !== 3) {
+      return;
+    }
+
+    byRank.set(rank, {
+      rank,
+      hotelId: typeof record.hotelId === 'string' ? record.hotelId : '',
+      location: typeof record.location === 'string' ? record.location : '',
+      imageUrl: typeof record.imageUrl === 'string' ? record.imageUrl : ''
+    });
+  });
+
+  return DEFAULT_TOP_FUTURE_STAYS.map((slot) => byRank.get(slot.rank) ?? slot);
+}
+
+function normalizeTopExperienceSlots(value: unknown): TopExperienceSlot[] {
+  if (!Array.isArray(value)) {
+    return DEFAULT_TOP_EXPERIENCES;
+  }
+
+  const byRank = new Map<TopPickRank, TopExperienceSlot>();
+
+  value.forEach((entry) => {
+    if (typeof entry !== 'object' || entry === null) {
+      return;
+    }
+
+    const record = entry as Record<string, unknown>;
+    const rank = record.rank;
+
+    if (rank !== 1 && rank !== 2 && rank !== 3) {
+      return;
+    }
+
+    byRank.set(rank, {
+      rank,
+      hotelId: typeof record.hotelId === 'string' ? record.hotelId : '',
+      description: typeof record.description === 'string' ? record.description : '',
+      imageUrl: typeof record.imageUrl === 'string' ? record.imageUrl : ''
+    });
+  });
+
+  return DEFAULT_TOP_EXPERIENCES.map((slot) => byRank.get(slot.rank) ?? slot);
+}
+
+function normalizeTopUnderratedSlots(value: unknown): TopUnderratedSlot[] {
+  if (!Array.isArray(value)) {
+    return DEFAULT_TOP_UNDERRATED;
+  }
+
+  const byRank = new Map<TopPickRank, TopUnderratedSlot>();
+
+  value.forEach((entry) => {
+    if (typeof entry !== 'object' || entry === null) {
+      return;
+    }
+
+    const record = entry as Record<string, unknown>;
+    const rank = record.rank;
+
+    if (rank !== 1 && rank !== 2 && rank !== 3) {
+      return;
+    }
+
+    byRank.set(rank, {
+      rank,
+      hotelId: typeof record.hotelId === 'string' ? record.hotelId : '',
+      imageUrl: typeof record.imageUrl === 'string' ? record.imageUrl : ''
+    });
+  });
+
+  return DEFAULT_TOP_UNDERRATED.map((slot) => byRank.get(slot.rank) ?? slot);
+}
+
+function normalizeTopReturnStaySlots(value: unknown): TopReturnStaySlot[] {
+  if (!Array.isArray(value)) {
+    return DEFAULT_TOP_RETURN_STAYS;
+  }
+
+  const byRank = new Map<TopPickRank, TopReturnStaySlot>();
+
+  value.forEach((entry) => {
+    if (typeof entry !== 'object' || entry === null) {
+      return;
+    }
+
+    const record = entry as Record<string, unknown>;
+    const rank = record.rank;
+
+    if (rank !== 1 && rank !== 2 && rank !== 3) {
+      return;
+    }
+
+    byRank.set(rank, {
+      rank,
+      hotelId: typeof record.hotelId === 'string' ? record.hotelId : '',
+      imageUrl: typeof record.imageUrl === 'string' ? record.imageUrl : ''
+    });
+  });
+
+  return DEFAULT_TOP_RETURN_STAYS.map((slot) => byRank.get(slot.rank) ?? slot);
+}
+
 function normalizeDisplayPreferences(value: unknown): DisplayPreferences {
   if (typeof value !== 'object' || value === null) {
     return DEFAULT_DISPLAY_PREFERENCES;
   }
 
   const record = value as Record<string, unknown>;
+  const sectionOrder = Array.isArray(record.sectionOrder)
+    ? record.sectionOrder.filter(
+        (entry): entry is DashboardSectionId =>
+          typeof entry === 'string' && DEFAULT_SECTION_ORDER.includes(entry as DashboardSectionId)
+      )
+    : [];
+  const mergedSectionOrder = [
+    ...sectionOrder,
+    ...DEFAULT_SECTION_ORDER.filter((sectionId) => !sectionOrder.includes(sectionId))
+  ];
 
   return {
     showTopHotels:
@@ -426,7 +591,24 @@ function normalizeDisplayPreferences(value: unknown): DisplayPreferences {
     showFutureHotels:
       typeof record.showFutureHotels === 'boolean'
         ? record.showFutureHotels
-        : DEFAULT_DISPLAY_PREFERENCES.showFutureHotels
+        : DEFAULT_DISPLAY_PREFERENCES.showFutureHotels,
+    showTopFutureStays:
+      typeof record.showTopFutureStays === 'boolean'
+        ? record.showTopFutureStays
+        : DEFAULT_DISPLAY_PREFERENCES.showTopFutureStays,
+    showTopExperiences:
+      typeof record.showTopExperiences === 'boolean'
+        ? record.showTopExperiences
+        : DEFAULT_DISPLAY_PREFERENCES.showTopExperiences,
+    showTopUnderrated:
+      typeof record.showTopUnderrated === 'boolean'
+        ? record.showTopUnderrated
+        : DEFAULT_DISPLAY_PREFERENCES.showTopUnderrated,
+    showTopReturnStays:
+      typeof record.showTopReturnStays === 'boolean'
+        ? record.showTopReturnStays
+        : DEFAULT_DISPLAY_PREFERENCES.showTopReturnStays,
+    sectionOrder: mergedSectionOrder
   };
 }
 
@@ -485,9 +667,11 @@ function getBrandVisualStyle(brandName: string, brandColor: string): BrandVisual
 
 export function HyattTierListClient({
   initialHotels,
+  initialDashboardPreferences,
   persistenceMode
 }: {
   initialHotels: HotelRecord[];
+  initialDashboardPreferences: DashboardPreferencesRecord;
   persistenceMode: PersistenceMode;
 }) {
   const [hotels, setHotels] = useState(() => normalizeHotelCollection(initialHotels));
@@ -507,15 +691,32 @@ export function HyattTierListClient({
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [isTopPicksOpen, setIsTopPicksOpen] = useState(false);
   const [isTopSuitesOpen, setIsTopSuitesOpen] = useState(false);
+  const [isTopFutureStaysOpen, setIsTopFutureStaysOpen] = useState(false);
+  const [isTopExperiencesOpen, setIsTopExperiencesOpen] = useState(false);
+  const [isTopUnderratedOpen, setIsTopUnderratedOpen] = useState(false);
+  const [isTopReturnStaysOpen, setIsTopReturnStaysOpen] = useState(false);
   const [selectedBrandName, setSelectedBrandName] = useState<string | null>(null);
   const reorderRequestIdRef = useRef(0);
-  const [topPicks, setTopPicks] = useState<TopPickSlot[]>(DEFAULT_TOP_PICKS);
-  const [topPicksDraft, setTopPicksDraft] = useState<TopPickSlot[]>(DEFAULT_TOP_PICKS);
+  const draggedHotelIdRef = useRef<string | null>(null);
+  const [topPicks, setTopPicks] = useState<TopPickSlot[]>(initialDashboardPreferences.topPicks);
+  const [topPicksDraft, setTopPicksDraft] = useState<TopPickSlot[]>(initialDashboardPreferences.topPicks);
   const [topPicksError, setTopPicksError] = useState<string | null>(null);
-  const [topSuites, setTopSuites] = useState<TopSuiteSlot[]>(DEFAULT_TOP_SUITES);
-  const [topSuitesDraft, setTopSuitesDraft] = useState<TopSuiteSlot[]>(DEFAULT_TOP_SUITES);
+  const [topSuites, setTopSuites] = useState<TopSuiteSlot[]>(initialDashboardPreferences.topSuites);
+  const [topSuitesDraft, setTopSuitesDraft] = useState<TopSuiteSlot[]>(initialDashboardPreferences.topSuites);
   const [topSuitesError, setTopSuitesError] = useState<string | null>(null);
-  const [displayPreferences, setDisplayPreferences] = useState<DisplayPreferences>(DEFAULT_DISPLAY_PREFERENCES);
+  const [topFutureStays, setTopFutureStays] = useState<TopFutureStaySlot[]>(initialDashboardPreferences.topFutureStays ?? DEFAULT_TOP_FUTURE_STAYS);
+  const [topFutureStaysDraft, setTopFutureStaysDraft] = useState<TopFutureStaySlot[]>(initialDashboardPreferences.topFutureStays ?? DEFAULT_TOP_FUTURE_STAYS);
+  const [topFutureStaysError, setTopFutureStaysError] = useState<string | null>(null);
+  const [topExperiences, setTopExperiences] = useState<TopExperienceSlot[]>(initialDashboardPreferences.topExperiences ?? DEFAULT_TOP_EXPERIENCES);
+  const [topExperiencesDraft, setTopExperiencesDraft] = useState<TopExperienceSlot[]>(initialDashboardPreferences.topExperiences ?? DEFAULT_TOP_EXPERIENCES);
+  const [topExperiencesError, setTopExperiencesError] = useState<string | null>(null);
+  const [topUnderrated, setTopUnderrated] = useState<TopUnderratedSlot[]>(initialDashboardPreferences.topUnderrated ?? DEFAULT_TOP_UNDERRATED);
+  const [topUnderratedDraft, setTopUnderratedDraft] = useState<TopUnderratedSlot[]>(initialDashboardPreferences.topUnderrated ?? DEFAULT_TOP_UNDERRATED);
+  const [topUnderratedError, setTopUnderratedError] = useState<string | null>(null);
+  const [topReturnStays, setTopReturnStays] = useState<TopReturnStaySlot[]>(initialDashboardPreferences.topReturnStays ?? DEFAULT_TOP_RETURN_STAYS);
+  const [topReturnStaysDraft, setTopReturnStaysDraft] = useState<TopReturnStaySlot[]>(initialDashboardPreferences.topReturnStays ?? DEFAULT_TOP_RETURN_STAYS);
+  const [topReturnStaysError, setTopReturnStaysError] = useState<string | null>(null);
+  const [displayPreferences, setDisplayPreferences] = useState<DisplayPreferences>(initialDashboardPreferences.displayPreferences);
 
   useEffect(() => {
     setIsHydrated(true);
@@ -533,39 +734,93 @@ export function HyattTierListClient({
       }
     }
 
-    const storedTopPicks = window.localStorage.getItem(TOP_PICKS_STORAGE_KEY);
+    if (persistenceMode === 'local') {
+      const storedTopPicks = window.localStorage.getItem(TOP_PICKS_STORAGE_KEY);
 
-    if (storedTopPicks) {
-      try {
-        const parsedTopPicks = JSON.parse(storedTopPicks) as unknown;
-        const normalizedTopPicks = normalizeTopPickSlots(parsedTopPicks);
-        setTopPicks(normalizedTopPicks);
-        setTopPicksDraft(normalizedTopPicks);
-      } catch {
-        window.localStorage.removeItem(TOP_PICKS_STORAGE_KEY);
+      if (storedTopPicks) {
+        try {
+          const parsedTopPicks = JSON.parse(storedTopPicks) as unknown;
+          const normalizedTopPicks = normalizeTopPickSlots(parsedTopPicks);
+          setTopPicks(normalizedTopPicks);
+          setTopPicksDraft(normalizedTopPicks);
+        } catch {
+          window.localStorage.removeItem(TOP_PICKS_STORAGE_KEY);
+        }
       }
-    }
 
-    const storedTopSuites = window.localStorage.getItem(TOP_SUITES_STORAGE_KEY);
+      const storedTopSuites = window.localStorage.getItem(TOP_SUITES_STORAGE_KEY);
 
-    if (storedTopSuites) {
-      try {
-        const parsedTopSuites = JSON.parse(storedTopSuites) as unknown;
-        const normalizedTopSuites = normalizeTopSuiteSlots(parsedTopSuites);
-        setTopSuites(normalizedTopSuites);
-        setTopSuitesDraft(normalizedTopSuites);
-      } catch {
-        window.localStorage.removeItem(TOP_SUITES_STORAGE_KEY);
+      if (storedTopSuites) {
+        try {
+          const parsedTopSuites = JSON.parse(storedTopSuites) as unknown;
+          const normalizedTopSuites = normalizeTopSuiteSlots(parsedTopSuites);
+          setTopSuites(normalizedTopSuites);
+          setTopSuitesDraft(normalizedTopSuites);
+        } catch {
+          window.localStorage.removeItem(TOP_SUITES_STORAGE_KEY);
+        }
       }
-    }
 
-    const storedDisplayPreferences = window.localStorage.getItem(DISPLAY_PREFERENCES_STORAGE_KEY);
+      const storedTopFutureStays = window.localStorage.getItem(TOP_FUTURE_STAYS_STORAGE_KEY);
 
-    if (storedDisplayPreferences) {
-      try {
-        setDisplayPreferences(normalizeDisplayPreferences(JSON.parse(storedDisplayPreferences) as unknown));
-      } catch {
-        window.localStorage.removeItem(DISPLAY_PREFERENCES_STORAGE_KEY);
+      if (storedTopFutureStays) {
+        try {
+          const parsedTopFutureStays = JSON.parse(storedTopFutureStays) as unknown;
+          const normalizedTopFutureStays = normalizeTopFutureStaySlots(parsedTopFutureStays);
+          setTopFutureStays(normalizedTopFutureStays);
+          setTopFutureStaysDraft(normalizedTopFutureStays);
+        } catch {
+          window.localStorage.removeItem(TOP_FUTURE_STAYS_STORAGE_KEY);
+        }
+      }
+
+      const storedTopExperiences = window.localStorage.getItem(TOP_EXPERIENCES_STORAGE_KEY);
+
+      if (storedTopExperiences) {
+        try {
+          const parsedTopExperiences = JSON.parse(storedTopExperiences) as unknown;
+          const normalizedTopExperiences = normalizeTopExperienceSlots(parsedTopExperiences);
+          setTopExperiences(normalizedTopExperiences);
+          setTopExperiencesDraft(normalizedTopExperiences);
+        } catch {
+          window.localStorage.removeItem(TOP_EXPERIENCES_STORAGE_KEY);
+        }
+      }
+
+      const storedTopUnderrated = window.localStorage.getItem(TOP_UNDERRATED_STORAGE_KEY);
+
+      if (storedTopUnderrated) {
+        try {
+          const parsedTopUnderrated = JSON.parse(storedTopUnderrated) as unknown;
+          const normalizedTopUnderrated = normalizeTopUnderratedSlots(parsedTopUnderrated);
+          setTopUnderrated(normalizedTopUnderrated);
+          setTopUnderratedDraft(normalizedTopUnderrated);
+        } catch {
+          window.localStorage.removeItem(TOP_UNDERRATED_STORAGE_KEY);
+        }
+      }
+
+      const storedTopReturnStays = window.localStorage.getItem(TOP_RETURN_STAYS_STORAGE_KEY);
+
+      if (storedTopReturnStays) {
+        try {
+          const parsedTopReturnStays = JSON.parse(storedTopReturnStays) as unknown;
+          const normalizedTopReturnStays = normalizeTopReturnStaySlots(parsedTopReturnStays);
+          setTopReturnStays(normalizedTopReturnStays);
+          setTopReturnStaysDraft(normalizedTopReturnStays);
+        } catch {
+          window.localStorage.removeItem(TOP_RETURN_STAYS_STORAGE_KEY);
+        }
+      }
+
+      const storedDisplayPreferences = window.localStorage.getItem(DISPLAY_PREFERENCES_STORAGE_KEY);
+
+      if (storedDisplayPreferences) {
+        try {
+          setDisplayPreferences(normalizeDisplayPreferences(JSON.parse(storedDisplayPreferences) as unknown));
+        } catch {
+          window.localStorage.removeItem(DISPLAY_PREFERENCES_STORAGE_KEY);
+        }
       }
     }
   }, [persistenceMode]);
@@ -579,28 +834,60 @@ export function HyattTierListClient({
   }, [hotels, isHydrated, persistenceMode]);
 
   useEffect(() => {
-    if (!isHydrated) {
+    if (!isHydrated || persistenceMode !== 'local') {
       return;
     }
 
     window.localStorage.setItem(TOP_PICKS_STORAGE_KEY, JSON.stringify(topPicks));
-  }, [isHydrated, topPicks]);
+  }, [isHydrated, persistenceMode, topPicks]);
 
   useEffect(() => {
-    if (!isHydrated) {
+    if (!isHydrated || persistenceMode !== 'local') {
       return;
     }
 
     window.localStorage.setItem(TOP_SUITES_STORAGE_KEY, JSON.stringify(topSuites));
-  }, [isHydrated, topSuites]);
+  }, [isHydrated, persistenceMode, topSuites]);
 
   useEffect(() => {
-    if (!isHydrated) {
+    if (!isHydrated || persistenceMode !== 'local') {
+      return;
+    }
+
+    window.localStorage.setItem(TOP_FUTURE_STAYS_STORAGE_KEY, JSON.stringify(topFutureStays));
+  }, [isHydrated, persistenceMode, topFutureStays]);
+
+  useEffect(() => {
+    if (!isHydrated || persistenceMode !== 'local') {
+      return;
+    }
+
+    window.localStorage.setItem(TOP_EXPERIENCES_STORAGE_KEY, JSON.stringify(topExperiences));
+  }, [isHydrated, persistenceMode, topExperiences]);
+
+  useEffect(() => {
+    if (!isHydrated || persistenceMode !== 'local') {
+      return;
+    }
+
+    window.localStorage.setItem(TOP_UNDERRATED_STORAGE_KEY, JSON.stringify(topUnderrated));
+  }, [isHydrated, persistenceMode, topUnderrated]);
+
+  useEffect(() => {
+    if (!isHydrated || persistenceMode !== 'local') {
+      return;
+    }
+
+    window.localStorage.setItem(TOP_RETURN_STAYS_STORAGE_KEY, JSON.stringify(topReturnStays));
+  }, [isHydrated, persistenceMode, topReturnStays]);
+
+  useEffect(() => {
+    if (!isHydrated || persistenceMode !== 'local') {
       return;
     }
 
     window.localStorage.setItem(DISPLAY_PREFERENCES_STORAGE_KEY, JSON.stringify(displayPreferences));
-  }, [displayPreferences, isHydrated]);
+  }, [displayPreferences, isHydrated, persistenceMode]);
 
   const exploredHotels = useMemo(
     () => sortHotelsByTier(hotels.filter((hotel) => hotel.stayType === 'EXPLORED')),
@@ -683,11 +970,58 @@ export function HyattTierListClient({
   );
   const hasCompleteTopSuites =
     topSuitesResolved.length === 3 && topSuites.every((slot) => slot.hotelId && slot.suiteName.trim());
-  const draggedHotel = useMemo(
-    () => hotels.find((hotel) => hotel.id === draggedHotelId) ?? null,
-    [draggedHotelId, hotels]
+  const topFutureStaysResolved = useMemo(
+    () =>
+      topFutureStays
+        .map((slot) => ({
+          ...slot,
+          location: slot.location.trim(),
+          hotel: futureHotels.find((hotel) => hotel.id === slot.hotelId) ?? null
+        }))
+        .filter((slot) => slot.hotel && slot.location)
+        .sort((left, right) => left.rank - right.rank),
+    [futureHotels, topFutureStays]
   );
-
+  const hasCompleteTopFutureStays =
+    topFutureStaysResolved.length === 3 && topFutureStays.every((slot) => slot.hotelId && slot.location.trim());
+  const topExperiencesResolved = useMemo(
+    () =>
+      topExperiences
+        .map((slot) => ({
+          ...slot,
+          description: slot.description.trim(),
+          hotel: exploredHotels.find((hotel) => hotel.id === slot.hotelId) ?? null
+        }))
+        .filter((slot) => slot.hotel && slot.description)
+        .sort((left, right) => left.rank - right.rank),
+    [exploredHotels, topExperiences]
+  );
+  const hasCompleteTopExperiences =
+    topExperiencesResolved.length === 3 && topExperiences.every((slot) => slot.hotelId && slot.description.trim());
+  const topUnderratedResolved = useMemo(
+    () =>
+      topUnderrated
+        .map((slot) => ({
+          ...slot,
+          hotel: exploredHotels.find((hotel) => hotel.id === slot.hotelId) ?? null
+        }))
+        .filter((slot) => slot.hotel)
+        .sort((left, right) => left.rank - right.rank),
+    [exploredHotels, topUnderrated]
+  );
+  const hasCompleteTopUnderrated = topUnderratedResolved.length === 3 && topUnderrated.every((slot) => slot.hotelId);
+  const topReturnStaysResolved = useMemo(
+    () =>
+      topReturnStays
+        .map((slot) => ({
+          ...slot,
+          hotel: exploredHotels.find((hotel) => hotel.id === slot.hotelId) ?? null
+        }))
+        .filter((slot) => slot.hotel)
+        .sort((left, right) => left.rank - right.rank),
+    [exploredHotels, topReturnStays]
+  );
+  const hasCompleteTopReturnStays = topReturnStaysResolved.length === 3 && topReturnStays.every((slot) => slot.hotelId);
   const summaryCards = [
     { label: 'Hotels Explored', value: exploredHotels.length },
     { label: 'Brands Explored', value: `${exploredBrandCount}/${HYATT_BRANDS.length}` },
@@ -696,6 +1030,98 @@ export function HyattTierListClient({
     {
       label: 'Planned Brand Explorations',
       value: brandsExploringCount
+    }
+  ];
+
+  const menuSections: DashboardMenuSection[] = [
+    {
+      id: 'topHotels' as const,
+      label: 'Top 3 Hotels',
+      description: 'Show or hide your hotel podium.',
+      shown: displayPreferences.showTopHotels,
+      toggle: () =>
+        void updateDisplayPreferences({
+          ...displayPreferences,
+          showTopHotels: !displayPreferences.showTopHotels
+        })
+    },
+    {
+      id: 'topSuites' as const,
+      label: 'Top 3 Suites',
+      description: 'Show or hide your suite favorites.',
+      shown: displayPreferences.showTopSuites,
+      toggle: () =>
+        void updateDisplayPreferences({
+          ...displayPreferences,
+          showTopSuites: !displayPreferences.showTopSuites
+        })
+    },
+    {
+      id: 'tierBoard' as const,
+      label: 'Tier Board',
+      description: 'Control visibility and compact mode together.',
+      shown: displayPreferences.showTierBoard,
+      hasCompactToggle: true,
+      toggle: () =>
+        void updateDisplayPreferences({
+          ...displayPreferences,
+          showTierBoard: !displayPreferences.showTierBoard
+        })
+    },
+    {
+      id: 'futureHotels' as const,
+      label: 'Planned Hotel Explorations',
+      description: 'Show or hide your future stays board.',
+      shown: displayPreferences.showFutureHotels,
+      toggle: () =>
+        void updateDisplayPreferences({
+          ...displayPreferences,
+          showFutureHotels: !displayPreferences.showFutureHotels
+        })
+    },
+    {
+      id: 'topFutureStays' as const,
+      label: 'Top 3 Future Stays',
+      description: 'Show or hide your anticipated stays podium.',
+      shown: displayPreferences.showTopFutureStays,
+      toggle: () =>
+        void updateDisplayPreferences({
+          ...displayPreferences,
+          showTopFutureStays: !displayPreferences.showTopFutureStays
+        })
+    },
+    {
+      id: 'topExperiences' as const,
+      label: 'Top 3 Experiences',
+      description: 'Show or hide your memorable-stays podium.',
+      shown: displayPreferences.showTopExperiences,
+      toggle: () =>
+        void updateDisplayPreferences({
+          ...displayPreferences,
+          showTopExperiences: !displayPreferences.showTopExperiences
+        })
+    },
+    {
+      id: 'topUnderrated' as const,
+      label: 'Top 3 Underrated',
+      description: 'Show or hide your hidden gems podium.',
+      shown: displayPreferences.showTopUnderrated,
+      toggle: () =>
+        void updateDisplayPreferences({
+          ...displayPreferences,
+          showTopUnderrated: !displayPreferences.showTopUnderrated
+        })
+    },
+    {
+      id: 'topReturnStays' as const,
+      label: 'Top 3 Return Stays',
+      description: 'Show or hide the stays you would revisit.',
+      shown: displayPreferences.showTopReturnStays,
+      toggle: () =>
+        void updateDisplayPreferences({
+          ...displayPreferences,
+          showTopReturnStays: !displayPreferences.showTopReturnStays
+        })
     }
   ];
 
@@ -723,6 +1149,50 @@ export function HyattTierListClient({
     );
   }, [exploredHotelsWithSuites]);
 
+  useEffect(() => {
+    setTopFutureStays((current) =>
+      current.map((slot) => {
+        const hotel = futureHotels.find((item) => item.id === slot.hotelId);
+
+        if (!hotel) {
+          return { ...slot, hotelId: '', location: '', imageUrl: '' };
+        }
+
+        return slot;
+      })
+    );
+  }, [futureHotels]);
+
+  useEffect(() => {
+    setTopExperiences((current) =>
+      current.map((slot) =>
+        exploredHotels.some((hotel) => hotel.id === slot.hotelId)
+          ? slot
+          : { ...slot, hotelId: '', description: '', imageUrl: '' }
+      )
+    );
+  }, [exploredHotels]);
+
+  useEffect(() => {
+    setTopUnderrated((current) =>
+      current.map((slot) =>
+        exploredHotels.some((hotel) => hotel.id === slot.hotelId)
+          ? slot
+          : { ...slot, hotelId: '', imageUrl: '' }
+      )
+    );
+  }, [exploredHotels]);
+
+  useEffect(() => {
+    setTopReturnStays((current) =>
+      current.map((slot) =>
+        exploredHotels.some((hotel) => hotel.id === slot.hotelId)
+          ? slot
+          : { ...slot, hotelId: '', imageUrl: '' }
+      )
+    );
+  }, [exploredHotels]);
+
   function closeModal() {
     setModalState(null);
     setDraft(DEFAULT_DRAFT);
@@ -735,7 +1205,27 @@ export function HyattTierListClient({
     setIsTopPicksOpen(true);
   }
 
-  function handleSaveTopPicks() {
+  async function persistDashboardPreferences(nextPreferences: DashboardPreferencesPatch) {
+    if (persistenceMode === 'local') {
+      return;
+    }
+
+    const response = await fetch('/api/dashboard-preferences', {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(nextPreferences)
+    });
+
+    const result = (await response.json()) as { message?: string };
+
+    if (!response.ok) {
+      throw new Error(result.message || 'Unable to save dashboard preferences.');
+    }
+  }
+
+  async function handleSaveTopPicks() {
     const selectedHotelIds = topPicksDraft.map((slot) => slot.hotelId).filter(Boolean);
 
     if (selectedHotelIds.length !== new Set(selectedHotelIds).size) {
@@ -743,14 +1233,26 @@ export function HyattTierListClient({
       return;
     }
 
-    setTopPicks(
-      topPicksDraft.map((slot) => ({
-        ...slot,
-        imageUrl: slot.imageUrl.trim()
-      }))
-    );
+    const nextTopPicks = topPicksDraft.map((slot) => ({
+      ...slot,
+      imageUrl: slot.imageUrl.trim()
+    }));
+
+    const previousTopPicks = topPicks;
+
+    setTopPicks(nextTopPicks);
+    setTopPicksDraft(nextTopPicks);
     setTopPicksError(null);
-    setIsTopPicksOpen(false);
+
+    try {
+      await persistDashboardPreferences({ topPicks: nextTopPicks });
+      setIsTopPicksOpen(false);
+    } catch (error) {
+      setTopPicks(previousTopPicks);
+      setTopPicksDraft(previousTopPicks);
+      setTopPicksError(error instanceof Error ? error.message : 'Unable to save top 3 hotels.');
+      return;
+    }
   }
 
   function openTopSuitesModal() {
@@ -759,7 +1261,7 @@ export function HyattTierListClient({
     setIsTopSuitesOpen(true);
   }
 
-  function handleSaveTopSuites() {
+  async function handleSaveTopSuites() {
     const selectedSuites = topSuitesDraft
       .map((slot) => `${slot.hotelId}::${slot.suiteName.trim().toLowerCase()}`)
       .filter((value) => value !== '::');
@@ -769,15 +1271,213 @@ export function HyattTierListClient({
       return;
     }
 
-    setTopSuites(
-      topSuitesDraft.map((slot) => ({
-        ...slot,
-        suiteName: slot.suiteName.trim(),
-        imageUrl: slot.imageUrl.trim()
-      }))
-    );
+    const nextTopSuites = topSuitesDraft.map((slot) => ({
+      ...slot,
+      suiteName: slot.suiteName.trim(),
+      imageUrl: slot.imageUrl.trim()
+    }));
+
+    const previousTopSuites = topSuites;
+
+    setTopSuites(nextTopSuites);
+    setTopSuitesDraft(nextTopSuites);
     setTopSuitesError(null);
-    setIsTopSuitesOpen(false);
+
+    try {
+      await persistDashboardPreferences({ topSuites: nextTopSuites });
+      setIsTopSuitesOpen(false);
+    } catch (error) {
+      setTopSuites(previousTopSuites);
+      setTopSuitesDraft(previousTopSuites);
+      setTopSuitesError(error instanceof Error ? error.message : 'Unable to save top 3 suites.');
+      return;
+    }
+  }
+
+  function openTopFutureStaysModal() {
+    setTopFutureStaysDraft(topFutureStays);
+    setTopFutureStaysError(null);
+    setIsTopFutureStaysOpen(true);
+  }
+
+  async function handleSaveTopFutureStays() {
+    const selectedHotelIds = topFutureStaysDraft.map((slot) => slot.hotelId).filter(Boolean);
+
+    if (selectedHotelIds.length !== new Set(selectedHotelIds).size) {
+      setTopFutureStaysError('Each future stay must be a different hotel.');
+      return;
+    }
+
+    const nextTopFutureStays = topFutureStaysDraft.map((slot) => ({
+      ...slot,
+      location: slot.location.trim(),
+      imageUrl: slot.imageUrl.trim()
+    }));
+
+    const previousTopFutureStays = topFutureStays;
+
+    setTopFutureStays(nextTopFutureStays);
+    setTopFutureStaysDraft(nextTopFutureStays);
+    setTopFutureStaysError(null);
+
+    try {
+      await persistDashboardPreferences({ topFutureStays: nextTopFutureStays });
+      setIsTopFutureStaysOpen(false);
+    } catch (error) {
+      setTopFutureStays(previousTopFutureStays);
+      setTopFutureStaysDraft(previousTopFutureStays);
+      setTopFutureStaysError(error instanceof Error ? error.message : 'Unable to save top 3 future stays.');
+    }
+  }
+
+  function openTopExperiencesModal() {
+    setTopExperiencesDraft(topExperiences);
+    setTopExperiencesError(null);
+    setIsTopExperiencesOpen(true);
+  }
+
+  async function handleSaveTopExperiences() {
+    const selectedHotelIds = topExperiencesDraft.map((slot) => slot.hotelId).filter(Boolean);
+
+    if (selectedHotelIds.length !== new Set(selectedHotelIds).size) {
+      setTopExperiencesError('Each experience must be a different hotel.');
+      return;
+    }
+
+    const nextTopExperiences = topExperiencesDraft.map((slot) => ({
+      ...slot,
+      description: slot.description.trim(),
+      imageUrl: slot.imageUrl.trim()
+    }));
+
+    const previousTopExperiences = topExperiences;
+
+    setTopExperiences(nextTopExperiences);
+    setTopExperiencesDraft(nextTopExperiences);
+    setTopExperiencesError(null);
+
+    try {
+      await persistDashboardPreferences({ topExperiences: nextTopExperiences });
+      setIsTopExperiencesOpen(false);
+    } catch (error) {
+      setTopExperiences(previousTopExperiences);
+      setTopExperiencesDraft(previousTopExperiences);
+      setTopExperiencesError(error instanceof Error ? error.message : 'Unable to save top 3 experiences.');
+    }
+  }
+
+  function openTopUnderratedModal() {
+    setTopUnderratedDraft(topUnderrated);
+    setTopUnderratedError(null);
+    setIsTopUnderratedOpen(true);
+  }
+
+  async function handleSaveTopUnderrated() {
+    const selectedHotelIds = topUnderratedDraft.map((slot) => slot.hotelId).filter(Boolean);
+
+    if (selectedHotelIds.length !== new Set(selectedHotelIds).size) {
+      setTopUnderratedError('Each underrated pick must be a different hotel.');
+      return;
+    }
+
+    const nextTopUnderrated = topUnderratedDraft.map((slot) => ({
+      ...slot,
+      imageUrl: slot.imageUrl.trim()
+    }));
+
+    const previousTopUnderrated = topUnderrated;
+
+    setTopUnderrated(nextTopUnderrated);
+    setTopUnderratedDraft(nextTopUnderrated);
+    setTopUnderratedError(null);
+
+    try {
+      await persistDashboardPreferences({ topUnderrated: nextTopUnderrated });
+      setIsTopUnderratedOpen(false);
+    } catch (error) {
+      setTopUnderrated(previousTopUnderrated);
+      setTopUnderratedDraft(previousTopUnderrated);
+      setTopUnderratedError(error instanceof Error ? error.message : 'Unable to save top 3 underrated.');
+    }
+  }
+
+  function openTopReturnStaysModal() {
+    setTopReturnStaysDraft(topReturnStays);
+    setTopReturnStaysError(null);
+    setIsTopReturnStaysOpen(true);
+  }
+
+  async function handleSaveTopReturnStays() {
+    const selectedHotelIds = topReturnStaysDraft.map((slot) => slot.hotelId).filter(Boolean);
+
+    if (selectedHotelIds.length !== new Set(selectedHotelIds).size) {
+      setTopReturnStaysError('Each return stay must be a different hotel.');
+      return;
+    }
+
+    const nextTopReturnStays = topReturnStaysDraft.map((slot) => ({
+      ...slot,
+      imageUrl: slot.imageUrl.trim()
+    }));
+
+    const previousTopReturnStays = topReturnStays;
+
+    setTopReturnStays(nextTopReturnStays);
+    setTopReturnStaysDraft(nextTopReturnStays);
+    setTopReturnStaysError(null);
+
+    try {
+      await persistDashboardPreferences({ topReturnStays: nextTopReturnStays });
+      setIsTopReturnStaysOpen(false);
+    } catch (error) {
+      setTopReturnStays(previousTopReturnStays);
+      setTopReturnStaysDraft(previousTopReturnStays);
+      setTopReturnStaysError(error instanceof Error ? error.message : 'Unable to save top 3 return stays.');
+    }
+  }
+
+  async function updateDisplayPreferences(nextDisplayPreferences: DisplayPreferences) {
+    const previousDisplayPreferences = displayPreferences;
+    setDisplayPreferences(nextDisplayPreferences);
+
+    try {
+      await persistDashboardPreferences({ displayPreferences: nextDisplayPreferences });
+    } catch (error) {
+      setDisplayPreferences(previousDisplayPreferences);
+      setErrorMessage(error instanceof Error ? error.message : 'Unable to save dashboard preferences.');
+    }
+  }
+
+  function getSectionOrder(sectionId: DashboardSectionId) {
+    const index = displayPreferences.sectionOrder.indexOf(sectionId);
+    return index >= 0 ? index + 1 : DEFAULT_SECTION_ORDER.indexOf(sectionId) + 1;
+  }
+
+  async function reorderSections(draggedId: DashboardSectionId, targetId: DashboardSectionId) {
+    if (draggedId === targetId) {
+      return;
+    }
+
+    const currentOrder = [...displayPreferences.sectionOrder];
+    const draggedIndex = currentOrder.indexOf(draggedId);
+    const targetIndex = currentOrder.indexOf(targetId);
+
+    if (draggedIndex < 0 || targetIndex < 0) {
+      return;
+    }
+
+    currentOrder.splice(draggedIndex, 1);
+    currentOrder.splice(targetIndex, 0, draggedId);
+
+    await updateDisplayPreferences({
+      ...displayPreferences,
+      sectionOrder: currentOrder
+    });
+  }
+
+  async function resetDashboardLayout() {
+    await updateDisplayPreferences({ ...DEFAULT_DISPLAY_PREFERENCES, sectionOrder: [...DEFAULT_SECTION_ORDER] });
+    setIsCompactMode(false);
   }
 
   function openCreateModal() {
@@ -799,6 +1499,7 @@ export function HyattTierListClient({
   }
 
   function resetDragState() {
+    draggedHotelIdRef.current = null;
     setDraggedHotelId(null);
     setDropTarget(null);
   }
@@ -923,11 +1624,13 @@ export function HyattTierListClient({
   }
 
   async function handleDropOnTarget(stayType: StayType, tier: Tier | null, beforeHotelId: string | null) {
-    if (!draggedHotelId) {
+    const activeDraggedHotelId = draggedHotelIdRef.current ?? draggedHotelId;
+
+    if (!activeDraggedHotelId) {
       return;
     }
 
-    const nextHotels = moveHotelInCollection(hotels, draggedHotelId, stayType, tier, beforeHotelId);
+    const nextHotels = moveHotelInCollection(hotels, activeDraggedHotelId, stayType, tier, beforeHotelId);
     await persistHotelOrder(nextHotels);
   }
 
@@ -944,7 +1647,9 @@ export function HyattTierListClient({
 
       if (persistenceMode !== 'local') {
         startTransition(() => {
-          setHotels((currentHotels) => normalizeHotelCollection(currentHotels.filter((hotel) => hotel.id !== modalState.hotelId)));
+          setHotels((currentHotels) =>
+            normalizeHotelCollection(currentHotels.filter((hotel) => hotel.id !== modalState.hotelId))
+          );
         });
       }
 
@@ -962,7 +1667,7 @@ export function HyattTierListClient({
         label: entry.label.trim(),
         kind: entry.kind
       }))
-      .filter((entry) => entry.label.length > 0);
+      .filter((entry) => entry.label);
 
     return {
       name: draft.name.trim(),
@@ -1130,7 +1835,7 @@ export function HyattTierListClient({
         </section>
 
         {displayPreferences.showTopHotels ? (
-        <section className="glass-panel rounded-[28px] px-4 py-4 sm:px-5 sm:py-5">
+        <section className="glass-panel rounded-[28px] px-4 py-4 sm:px-5 sm:py-5" style={{ order: getSectionOrder('topHotels') }}>
           <div className="flex items-center justify-between gap-3">
             <div>
               <button
@@ -1165,10 +1870,14 @@ export function HyattTierListClient({
                   >
                     <div className="relative h-48 sm:h-52">
                       {slot.imageUrl ? (
-                        <img
+                        <Image
                           src={slot.imageUrl}
                           alt={hotel.name}
-                          className="h-full w-full object-cover"
+                          fill
+                          unoptimized
+                          loader={imageLoader}
+                          sizes="(max-width: 1024px) 100vw, 33vw"
+                          className="object-cover"
                         />
                       ) : (
                         <div
@@ -1201,7 +1910,7 @@ export function HyattTierListClient({
         ) : null}
 
         {displayPreferences.showTopSuites ? (
-        <section className="glass-panel rounded-[28px] px-4 py-4 sm:px-5 sm:py-5">
+        <section className="glass-panel rounded-[28px] px-4 py-4 sm:px-5 sm:py-5" style={{ order: getSectionOrder('topSuites') }}>
           <div className="flex items-center justify-between gap-3">
             <div>
               <button
@@ -1236,10 +1945,14 @@ export function HyattTierListClient({
                   >
                     <div className="relative h-48 sm:h-52">
                       {slot.imageUrl ? (
-                        <img
+                        <Image
                           src={slot.imageUrl}
                           alt={`${hotel.name} ${slot.suiteName}`}
-                          className="h-full w-full object-cover"
+                          fill
+                          unoptimized
+                          loader={imageLoader}
+                          sizes="(max-width: 1024px) 100vw, 33vw"
+                          className="object-cover"
                         />
                       ) : (
                         <div
@@ -1275,7 +1988,7 @@ export function HyattTierListClient({
         ) : null}
 
         {displayPreferences.showTierBoard ? (
-        <section className="glass-panel rounded-[28px] px-4 py-4 sm:px-5 sm:py-5">
+        <section className="glass-panel rounded-[28px] px-4 py-4 sm:px-5 sm:py-5" style={{ order: getSectionOrder('tierBoard') }}>
           <div className="flex items-center justify-between gap-3">
             <p className="section-label">Tier Board</p>
           </div>
@@ -1290,7 +2003,7 @@ export function HyattTierListClient({
                   <section
                     key={tier}
                     onDragOver={(event) => {
-                      if (!draggedHotelId) {
+                      if (!(draggedHotelIdRef.current ?? draggedHotelId)) {
                         return;
                       }
 
@@ -1353,6 +2066,7 @@ export function HyattTierListClient({
                               data-hotel-id={hotel.id}
                               draggable
                               onDragStart={(event) => {
+                                draggedHotelIdRef.current = hotel.id;
                                 setDraggedHotelId(hotel.id);
                                 setDropTarget({ stayType: 'EXPLORED', tier: hotel.tier, beforeHotelId: hotel.id });
                                 setRecentlyDraggedHotelId(hotel.id);
@@ -1477,7 +2191,7 @@ export function HyattTierListClient({
         ) : null}
 
         {displayPreferences.showFutureHotels ? (
-        <section className="glass-panel rounded-[28px] px-4 py-4 sm:px-5 sm:py-5">
+        <section className="glass-panel rounded-[28px] px-4 py-4 sm:px-5 sm:py-5" style={{ order: getSectionOrder('futureHotels') }}>
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <p className="section-label">Planned Hotel Explorations</p>
@@ -1494,7 +2208,11 @@ export function HyattTierListClient({
               isCompactMode ? 'bg-white/78 p-2.5 sm:p-3' : 'bg-white/40 p-3 sm:p-4'
             }`}
             onDragOver={(event) => {
-              if (!draggedHotel || draggedHotel.stayType !== 'FUTURE') {
+              const activeDraggedHotel = hotels.find(
+                (hotel) => hotel.id === (draggedHotelIdRef.current ?? draggedHotelId)
+              );
+
+              if (!activeDraggedHotel || activeDraggedHotel.stayType !== 'FUTURE') {
                 return;
               }
 
@@ -1502,7 +2220,11 @@ export function HyattTierListClient({
               setDropTarget(resolveDropTargetFromPointer(event, 'FUTURE', null));
             }}
             onDrop={(event) => {
-              if (!draggedHotel || draggedHotel.stayType !== 'FUTURE') {
+              const activeDraggedHotel = hotels.find(
+                (hotel) => hotel.id === (draggedHotelIdRef.current ?? draggedHotelId)
+              );
+
+              if (!activeDraggedHotel || activeDraggedHotel.stayType !== 'FUTURE') {
                 return;
               }
 
@@ -1527,6 +2249,7 @@ export function HyattTierListClient({
                       data-hotel-id={hotel.id}
                       draggable
                       onDragStart={(event) => {
+                        draggedHotelIdRef.current = hotel.id;
                         setDraggedHotelId(hotel.id);
                         setDropTarget({ stayType: 'FUTURE', tier: null, beforeHotelId: hotel.id });
                         setRecentlyDraggedHotelId(hotel.id);
@@ -1601,117 +2324,320 @@ export function HyattTierListClient({
           </div>
         </section>
         ) : null}
-      </div>
 
-      {isMenuOpen ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-[rgba(42,18,22,0.48)] px-4 py-8 backdrop-blur-sm">
-          <div className="glass-panel w-full max-w-2xl rounded-[30px] p-5 sm:p-7">
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <p className="section-label">Menu</p>
-                <h2 className="mt-2 text-2xl font-semibold leading-none text-[rgb(var(--page-foreground))] font-[family:var(--font-display)] sm:text-4xl">
-                  Customize your dashboard
-                </h2>
-                <div className="mt-2 text-sm text-[rgba(34,58,86,0.62)]">
-                  Show or hide sections, and switch compact mode for the tier boards.
-                </div>
-              </div>
+        {displayPreferences.showTopFutureStays ? (
+        <section className="glass-panel rounded-[28px] px-4 py-4 sm:px-5 sm:py-5" style={{ order: getSectionOrder('topFutureStays') }}>
+          <div className="flex items-center justify-between gap-3">
+            <div>
               <button
                 type="button"
-                onClick={() => setIsMenuOpen(false)}
-                className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-[rgba(118,31,47,0.16)] bg-white/80 text-lg text-[rgb(var(--wine))] transition hover:bg-[rgba(118,31,47,0.06)]"
-                aria-label="Close menu"
+                onClick={openTopFutureStaysModal}
+                className="section-label transition hover:text-[rgb(var(--wine))]"
               >
-                ×
+                Top 3 Future Stays
               </button>
-            </div>
-
-            <div className="mt-6 space-y-3">
-              <div className="rounded-[22px] border border-[rgba(118,31,47,0.1)] bg-white/65 p-4">
-                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                  <div>
-                    <div className="text-sm font-semibold text-[rgb(var(--page-foreground))]">Top 3 Hotels</div>
-                    <div className="mt-1 text-sm text-[rgba(34,58,86,0.62)]">Show or hide your hotel podium.</div>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setDisplayPreferences((current) => ({ ...current, showTopHotels: !current.showTopHotels }))
-                    }
-                    className="rounded-full border border-[rgba(0,102,179,0.18)] bg-white/85 px-4 py-2 text-xs font-semibold uppercase tracking-[0.14em] text-[rgb(var(--wine))]"
-                  >
-                    {displayPreferences.showTopHotels ? 'Shown' : 'Hidden'}
-                  </button>
-                </div>
-              </div>
-
-              <div className="rounded-[22px] border border-[rgba(118,31,47,0.1)] bg-white/65 p-4">
-                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                  <div>
-                    <div className="text-sm font-semibold text-[rgb(var(--page-foreground))]">Top 3 Suites</div>
-                    <div className="mt-1 text-sm text-[rgba(34,58,86,0.62)]">Show or hide your suite favorites.</div>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setDisplayPreferences((current) => ({ ...current, showTopSuites: !current.showTopSuites }))
-                    }
-                    className="rounded-full border border-[rgba(0,102,179,0.18)] bg-white/85 px-4 py-2 text-xs font-semibold uppercase tracking-[0.14em] text-[rgb(var(--wine))]"
-                  >
-                    {displayPreferences.showTopSuites ? 'Shown' : 'Hidden'}
-                  </button>
-                </div>
-              </div>
-
-              <div className="rounded-[22px] border border-[rgba(118,31,47,0.1)] bg-white/65 p-4">
-                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                  <div>
-                    <div className="text-sm font-semibold text-[rgb(var(--page-foreground))]">Tier Board</div>
-                    <div className="mt-1 text-sm text-[rgba(34,58,86,0.62)]">Control visibility and compact mode together.</div>
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setDisplayPreferences((current) => ({ ...current, showTierBoard: !current.showTierBoard }))
-                      }
-                      className="rounded-full border border-[rgba(0,102,179,0.18)] bg-white/85 px-4 py-2 text-xs font-semibold uppercase tracking-[0.14em] text-[rgb(var(--wine))]"
-                    >
-                      {displayPreferences.showTierBoard ? 'Shown' : 'Hidden'}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setIsCompactMode((current) => !current)}
-                      aria-pressed={isCompactMode}
-                      className="rounded-full border border-[rgba(0,102,179,0.18)] bg-white/85 px-4 py-2 text-xs font-semibold uppercase tracking-[0.14em] text-[rgb(var(--wine))]"
-                    >
-                      {isCompactMode ? 'Compact on' : 'Compact off'}
-                    </button>
-                  </div>
-                </div>
-              </div>
-
-              <div className="rounded-[22px] border border-[rgba(118,31,47,0.1)] bg-white/65 p-4">
-                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                  <div>
-                    <div className="text-sm font-semibold text-[rgb(var(--page-foreground))]">Planned Hotel Explorations</div>
-                    <div className="mt-1 text-sm text-[rgba(34,58,86,0.62)]">Show or hide your future stays board.</div>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setDisplayPreferences((current) => ({ ...current, showFutureHotels: !current.showFutureHotels }))
-                    }
-                    className="rounded-full border border-[rgba(0,102,179,0.18)] bg-white/85 px-4 py-2 text-xs font-semibold uppercase tracking-[0.14em] text-[rgb(var(--wine))]"
-                  >
-                    {displayPreferences.showFutureHotels ? 'Shown' : 'Hidden'}
-                  </button>
-                </div>
-              </div>
+              <h2 className="mt-2 text-2xl font-semibold text-[rgb(var(--page-foreground))] font-[family:var(--font-display)] sm:text-3xl">
+                My Most Anticipated
+              </h2>
             </div>
           </div>
-        </div>
-      ) : null}
+
+          {hasCompleteTopFutureStays ? (
+            <div className="mt-5 grid gap-4 lg:grid-cols-3">
+              {topFutureStaysResolved.map((slot) => {
+                const hotel = slot.hotel;
+
+                if (!hotel) {
+                  return null;
+                }
+
+                const brandColor = BRAND_BY_NAME[hotel.brand]?.color ?? '#1D4ED8';
+
+                return (
+                  <article
+                    key={`${slot.rank}-${hotel.id}`}
+                    className="relative overflow-hidden rounded-[28px] border border-white/50 bg-[rgba(255,255,255,0.82)] shadow-[0_20px_60px_rgba(26,74,122,0.16)]"
+                  >
+                    <div className="relative h-48 sm:h-52">
+                      {slot.imageUrl ? (
+                        <Image
+                          src={slot.imageUrl}
+                          alt={hotel.name}
+                          fill
+                          unoptimized
+                          loader={imageLoader}
+                          sizes="(max-width: 1024px) 100vw, 33vw"
+                          className="object-cover"
+                        />
+                      ) : (
+                        <div
+                          className="h-full w-full"
+                          style={{
+                            background: `radial-gradient(circle at top left, ${brandColor}66, transparent 34%), linear-gradient(135deg, ${brandColor}26, rgba(18,42,68,0.18))`
+                          }}
+                        />
+                      )}
+                      <div className="absolute inset-0 bg-gradient-to-t from-[rgba(8,18,32,0.92)] via-[rgba(12,24,40,0.3)] to-transparent" />
+                      <div className="absolute left-4 top-4 rounded-full border border-white/70 bg-[rgba(255,255,255,0.78)] px-3 py-1 text-xs font-semibold uppercase tracking-[0.14em] text-[rgb(var(--wine))] shadow-[0_10px_24px_rgba(12,24,40,0.18)] backdrop-blur-md">
+                        No. {slot.rank}
+                      </div>
+                      <div className="absolute bottom-4 left-4 right-4">
+                        <div className="text-xl font-semibold leading-tight text-white drop-shadow-[0_3px_10px_rgba(0,0,0,0.5)]">
+                          {hotel.name}
+                        </div>
+                        <div className="mt-2 inline-flex max-w-full rounded-full border border-white/20 bg-white/18 px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.12em] text-white backdrop-blur-sm">
+                          {slot.location}
+                        </div>
+                      </div>
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="mt-5 rounded-[22px] border border-dashed border-[rgba(0,102,179,0.16)] bg-white/58 p-5 text-sm text-[rgba(34,58,86,0.62)]">
+              Click Top 3 Future Stays to set up your most anticipated hotels.
+            </div>
+          )}
+        </section>
+        ) : null}
+
+        {displayPreferences.showTopExperiences ? (
+        <section className="glass-panel rounded-[28px] px-4 py-4 sm:px-5 sm:py-5" style={{ order: getSectionOrder('topExperiences') }}>
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <button
+                type="button"
+                onClick={openTopExperiencesModal}
+                className="section-label transition hover:text-[rgb(var(--wine))]"
+              >
+                Top 3 Experiences
+              </button>
+              <h2 className="mt-2 text-2xl font-semibold text-[rgb(var(--page-foreground))] font-[family:var(--font-display)] sm:text-3xl">
+                My Most Memorable
+              </h2>
+            </div>
+          </div>
+
+          {hasCompleteTopExperiences ? (
+            <div className="mt-5 grid gap-4 lg:grid-cols-3">
+              {topExperiencesResolved.map((slot) => {
+                const hotel = slot.hotel;
+
+                if (!hotel) {
+                  return null;
+                }
+
+                const brandColor = BRAND_BY_NAME[hotel.brand]?.color ?? '#1D4ED8';
+
+                return (
+                  <article
+                    key={`${slot.rank}-${hotel.id}-${slot.description}`}
+                    className="relative overflow-hidden rounded-[28px] border border-white/50 bg-[rgba(255,255,255,0.82)] shadow-[0_20px_60px_rgba(26,74,122,0.16)]"
+                  >
+                    <div className="relative h-52 sm:h-56">
+                      {slot.imageUrl ? (
+                        <Image
+                          src={slot.imageUrl}
+                          alt={hotel.name}
+                          fill
+                          unoptimized
+                          loader={imageLoader}
+                          sizes="(max-width: 1024px) 100vw, 33vw"
+                          className="object-cover"
+                        />
+                      ) : (
+                        <div
+                          className="h-full w-full"
+                          style={{
+                            background: `radial-gradient(circle at top left, ${brandColor}66, transparent 34%), linear-gradient(135deg, ${brandColor}26, rgba(18,42,68,0.18))`
+                          }}
+                        />
+                      )}
+                      <div className="absolute inset-0 bg-gradient-to-t from-[rgba(8,18,32,0.94)] via-[rgba(12,24,40,0.36)] to-transparent" />
+                      <div className="absolute left-4 top-4 rounded-full border border-white/70 bg-[rgba(255,255,255,0.78)] px-3 py-1 text-xs font-semibold uppercase tracking-[0.14em] text-[rgb(var(--wine))] shadow-[0_10px_24px_rgba(12,24,40,0.18)] backdrop-blur-md">
+                        No. {slot.rank}
+                      </div>
+                      <div className="absolute bottom-4 left-4 right-4">
+                        <div className="text-xl font-semibold leading-tight text-white drop-shadow-[0_3px_10px_rgba(0,0,0,0.5)]">
+                          {hotel.name}
+                        </div>
+                        <div className="mt-2 rounded-[18px] border border-white/18 bg-white/14 px-3 py-2 text-sm leading-relaxed text-white backdrop-blur-sm">
+                          {slot.description}
+                        </div>
+                      </div>
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="mt-5 rounded-[22px] border border-dashed border-[rgba(0,102,179,0.16)] bg-white/58 p-5 text-sm text-[rgba(34,58,86,0.62)]">
+              Click Top 3 Experiences to set up your most memorable stays.
+            </div>
+          )}
+        </section>
+        ) : null}
+
+        {displayPreferences.showTopUnderrated ? (
+        <section className="glass-panel rounded-[28px] px-4 py-4 sm:px-5 sm:py-5" style={{ order: getSectionOrder('topUnderrated') }}>
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <button
+                type="button"
+                onClick={openTopUnderratedModal}
+                className="section-label transition hover:text-[rgb(var(--wine))]"
+              >
+                Top 3 Underrated
+              </button>
+              <h2 className="mt-2 text-2xl font-semibold text-[rgb(var(--page-foreground))] font-[family:var(--font-display)] sm:text-3xl">
+                Hidden Gems
+              </h2>
+            </div>
+          </div>
+
+          {hasCompleteTopUnderrated ? (
+            <div className="mt-5 grid gap-4 lg:grid-cols-3">
+              {topUnderratedResolved.map((slot) => {
+                const hotel = slot.hotel;
+
+                if (!hotel) {
+                  return null;
+                }
+
+                const brandColor = BRAND_BY_NAME[hotel.brand]?.color ?? '#1D4ED8';
+
+                return (
+                  <article
+                    key={`${slot.rank}-${hotel.id}`}
+                    className="relative overflow-hidden rounded-[28px] border border-white/50 bg-[rgba(255,255,255,0.82)] shadow-[0_20px_60px_rgba(26,74,122,0.16)]"
+                  >
+                    <div className="relative h-48 sm:h-52">
+                      {slot.imageUrl ? (
+                        <Image
+                          src={slot.imageUrl}
+                          alt={hotel.name}
+                          fill
+                          unoptimized
+                          loader={imageLoader}
+                          sizes="(max-width: 1024px) 100vw, 33vw"
+                          className="object-cover"
+                        />
+                      ) : (
+                        <div
+                          className="h-full w-full"
+                          style={{
+                            background: `radial-gradient(circle at top left, ${brandColor}66, transparent 34%), linear-gradient(135deg, ${brandColor}26, rgba(18,42,68,0.18))`
+                          }}
+                        />
+                      )}
+                      <div className="absolute inset-0 bg-gradient-to-t from-[rgba(12,24,40,0.84)] via-[rgba(12,24,40,0.24)] to-transparent" />
+                      <div className="absolute left-4 top-4 rounded-full border border-white/70 bg-[rgba(255,255,255,0.78)] px-3 py-1 text-xs font-semibold uppercase tracking-[0.14em] text-[rgb(var(--wine))] shadow-[0_10px_24px_rgba(12,24,40,0.18)] backdrop-blur-md">
+                        No. {slot.rank}
+                      </div>
+                      <div className="absolute bottom-4 left-4 right-4">
+                        <div className="text-2xl font-semibold leading-tight text-white drop-shadow-[0_3px_10px_rgba(0,0,0,0.42)]">
+                          {hotel.name}
+                        </div>
+                      </div>
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="mt-5 rounded-[22px] border border-dashed border-[rgba(0,102,179,0.16)] bg-white/58 p-5 text-sm text-[rgba(34,58,86,0.62)]">
+              Click Top 3 Underrated to set up your hidden gems.
+            </div>
+          )}
+        </section>
+        ) : null}
+
+        {displayPreferences.showTopReturnStays ? (
+        <section className="glass-panel rounded-[28px] px-4 py-4 sm:px-5 sm:py-5" style={{ order: getSectionOrder('topReturnStays') }}>
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <button
+                type="button"
+                onClick={openTopReturnStaysModal}
+                className="section-label transition hover:text-[rgb(var(--wine))]"
+              >
+                Top 3 Return Stays
+              </button>
+              <h2 className="mt-2 text-2xl font-semibold text-[rgb(var(--page-foreground))] font-[family:var(--font-display)] sm:text-3xl">
+                Would Stay Again
+              </h2>
+            </div>
+          </div>
+
+          {hasCompleteTopReturnStays ? (
+            <div className="mt-5 grid gap-4 lg:grid-cols-3">
+              {topReturnStaysResolved.map((slot) => {
+                const hotel = slot.hotel;
+
+                if (!hotel) {
+                  return null;
+                }
+
+                const brandColor = BRAND_BY_NAME[hotel.brand]?.color ?? '#1D4ED8';
+
+                return (
+                  <article
+                    key={`${slot.rank}-${hotel.id}`}
+                    className="relative overflow-hidden rounded-[28px] border border-white/50 bg-[rgba(255,255,255,0.82)] shadow-[0_20px_60px_rgba(26,74,122,0.16)]"
+                  >
+                    <div className="relative h-48 sm:h-52">
+                      {slot.imageUrl ? (
+                        <Image
+                          src={slot.imageUrl}
+                          alt={hotel.name}
+                          fill
+                          unoptimized
+                          loader={imageLoader}
+                          sizes="(max-width: 1024px) 100vw, 33vw"
+                          className="object-cover"
+                        />
+                      ) : (
+                        <div
+                          className="h-full w-full"
+                          style={{
+                            background: `radial-gradient(circle at top left, ${brandColor}66, transparent 34%), linear-gradient(135deg, ${brandColor}26, rgba(18,42,68,0.18))`
+                          }}
+                        />
+                      )}
+                      <div className="absolute inset-0 bg-gradient-to-t from-[rgba(12,24,40,0.84)] via-[rgba(12,24,40,0.24)] to-transparent" />
+                      <div className="absolute left-4 top-4 rounded-full border border-white/70 bg-[rgba(255,255,255,0.78)] px-3 py-1 text-xs font-semibold uppercase tracking-[0.14em] text-[rgb(var(--wine))] shadow-[0_10px_24px_rgba(12,24,40,0.18)] backdrop-blur-md">
+                        No. {slot.rank}
+                      </div>
+                      <div className="absolute bottom-4 left-4 right-4">
+                        <div className="text-2xl font-semibold leading-tight text-white drop-shadow-[0_3px_10px_rgba(0,0,0,0.42)]">
+                          {hotel.name}
+                        </div>
+                      </div>
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="mt-5 rounded-[22px] border border-dashed border-[rgba(0,102,179,0.16)] bg-white/58 p-5 text-sm text-[rgba(34,58,86,0.62)]">
+              Click Top 3 Return Stays to set up the hotels you would stay at again.
+            </div>
+          )}
+        </section>
+        ) : null}
+      </div>
+
+      <DashboardMenuModal
+        isOpen={isMenuOpen}
+        sections={menuSections}
+        sectionOrder={displayPreferences.sectionOrder}
+        isCompactMode={isCompactMode}
+        onClose={() => setIsMenuOpen(false)}
+        onToggleCompact={() => setIsCompactMode((current) => !current)}
+        onReset={() => void resetDashboardLayout()}
+        onReorder={(draggedId, targetId) => void reorderSections(draggedId, targetId)}
+      />
 
       {selectedBrand && selectedBrandHotels.length ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-[rgba(42,18,22,0.48)] px-4 py-8 backdrop-blur-sm">
@@ -1804,9 +2730,6 @@ export function HyattTierListClient({
                 <h2 className="mt-2 text-2xl font-semibold leading-none text-[rgb(var(--page-foreground))] font-[family:var(--font-display)] sm:text-4xl">
                   Hyatt brands and colors
                 </h2>
-                <div className="mt-2 text-sm text-[rgba(34,58,86,0.62)]">
-                  All 38 brands in their full brand color.
-                </div>
               </div>
 
               <button
@@ -1864,9 +2787,6 @@ export function HyattTierListClient({
                 <h2 className="mt-2 text-2xl font-semibold leading-none text-[rgb(var(--page-foreground))] font-[family:var(--font-display)] sm:text-4xl">
                   All Hyatt brands
                 </h2>
-                <div className="mt-2 text-sm text-[rgba(34,58,86,0.62)]">
-                  Explored brands keep their color. Everything else stays grey.
-                </div>
               </div>
 
               <button
@@ -1929,7 +2849,7 @@ export function HyattTierListClient({
               <div>
                 <p className="section-label">Planned Brand Explorations</p>
                 <h2 className="mt-2 text-2xl font-semibold leading-none text-[rgb(var(--page-foreground))] font-[family:var(--font-display)] sm:text-4xl">
-                  Future brands on deck
+                  Future Hyatt Brands on Deck
                 </h2>
               </div>
               <button
@@ -1976,7 +2896,7 @@ export function HyattTierListClient({
               <div>
                 <p className="section-label">Suites Explored</p>
                 <h2 className="mt-2 text-2xl font-semibold leading-none text-[rgb(var(--page-foreground))] font-[family:var(--font-display)] sm:text-4xl">
-                  Every suite you logged
+                  Every Suite I Explored
                 </h2>
               </div>
               <button
@@ -2019,7 +2939,7 @@ export function HyattTierListClient({
 
       {isTopPicksOpen ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-[rgba(42,18,22,0.48)] px-4 py-8 backdrop-blur-sm">
-          <div className="glass-panel w-full max-w-3xl rounded-[30px] p-5 sm:p-7">
+          <div className="glass-panel max-h-[calc(100vh-3rem)] w-full max-w-3xl overflow-y-auto rounded-[30px] p-5 sm:p-7">
             <div className="flex items-start justify-between gap-4">
               <div>
                 <p className="section-label">Top 3 Hotels</p>
@@ -2117,7 +3037,7 @@ export function HyattTierListClient({
 
       {isTopSuitesOpen ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-[rgba(42,18,22,0.48)] px-4 py-8 backdrop-blur-sm">
-          <div className="glass-panel w-full max-w-4xl rounded-[30px] p-5 sm:p-7">
+          <div className="glass-panel max-h-[calc(100vh-3rem)] w-full max-w-4xl overflow-y-auto rounded-[30px] p-5 sm:p-7">
             <div className="flex items-start justify-between gap-4">
               <div>
                 <p className="section-label">Top 3 Suites</p>
@@ -2238,6 +3158,431 @@ export function HyattTierListClient({
                 className="rounded-full bg-[rgb(var(--wine))] px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-[#004f8d]"
               >
                 Save top 3 suites
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {isTopFutureStaysOpen ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-[rgba(42,18,22,0.48)] px-4 py-8 backdrop-blur-sm">
+          <div className="glass-panel max-h-[calc(100vh-3rem)] w-full max-w-4xl overflow-y-auto rounded-[30px] p-5 sm:p-7">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="section-label">Top 3 Future Stays</p>
+                <h2 className="mt-2 text-2xl font-semibold leading-none text-[rgb(var(--page-foreground))] font-[family:var(--font-display)] sm:text-4xl">
+                  Build your most anticipated list
+                </h2>
+                <div className="mt-2 text-sm text-[rgba(34,58,86,0.62)]">
+                  Pick your three most anticipated future hotels, add the location, and optionally paste a photo URL.
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsTopFutureStaysOpen(false)}
+                className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-[rgba(118,31,47,0.16)] bg-white/80 text-lg text-[rgb(var(--wine))] transition hover:bg-[rgba(118,31,47,0.06)]"
+                aria-label="Close top 3 future stays"
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="mt-6 space-y-4">
+              {topFutureStaysDraft.map((slot, index) => (
+                <div key={slot.rank} className="rounded-[24px] border border-[rgba(0,102,179,0.1)] bg-white/68 p-4">
+                  <div className="mb-3 text-sm font-semibold uppercase tracking-[0.14em] text-[rgba(34,58,86,0.58)]">
+                    Rank #{slot.rank}
+                  </div>
+                  <div className="grid gap-3 md:grid-cols-3">
+                    <label className="space-y-2">
+                      <span className="text-sm font-semibold text-[rgb(var(--page-foreground))]">Hotel</span>
+                      <select
+                        value={slot.hotelId}
+                        onChange={(event) =>
+                          setTopFutureStaysDraft((current) =>
+                            current.map((item, itemIndex) =>
+                              itemIndex === index ? { ...item, hotelId: event.target.value } : item
+                            )
+                          )
+                        }
+                        className="w-full rounded-[16px] border border-[rgba(118,31,47,0.14)] bg-white/90 px-4 py-3 text-sm text-[rgb(var(--page-foreground))] outline-none transition focus:border-[rgba(118,31,47,0.32)] focus:ring-4 focus:ring-[rgba(118,31,47,0.08)]"
+                      >
+                        <option value="">Select a hotel</option>
+                        {futureHotels.map((hotel) => (
+                          <option key={hotel.id} value={hotel.id}>
+                            {hotel.name}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+
+                    <label className="space-y-2">
+                      <span className="text-sm font-semibold text-[rgb(var(--page-foreground))]">Location</span>
+                      <input
+                        value={slot.location}
+                        onChange={(event) =>
+                          setTopFutureStaysDraft((current) =>
+                            current.map((item, itemIndex) =>
+                              itemIndex === index ? { ...item, location: event.target.value } : item
+                            )
+                          )
+                        }
+                        placeholder="City, state, or destination"
+                        className="w-full rounded-[16px] border border-[rgba(118,31,47,0.14)] bg-white/90 px-4 py-3 text-sm text-[rgb(var(--page-foreground))] outline-none transition focus:border-[rgba(118,31,47,0.32)] focus:ring-4 focus:ring-[rgba(118,31,47,0.08)]"
+                      />
+                    </label>
+
+                    <label className="space-y-2">
+                      <span className="text-sm font-semibold text-[rgb(var(--page-foreground))]">Photo URL</span>
+                      <input
+                        value={slot.imageUrl}
+                        onChange={(event) =>
+                          setTopFutureStaysDraft((current) =>
+                            current.map((item, itemIndex) =>
+                              itemIndex === index ? { ...item, imageUrl: event.target.value } : item
+                            )
+                          )
+                        }
+                        placeholder="Paste an image URL"
+                        className="w-full rounded-[16px] border border-[rgba(118,31,47,0.14)] bg-white/90 px-4 py-3 text-sm text-[rgb(var(--page-foreground))] outline-none transition focus:border-[rgba(118,31,47,0.32)] focus:ring-4 focus:ring-[rgba(118,31,47,0.08)]"
+                      />
+                    </label>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {topFutureStaysError ? (
+              <div className="mt-4 rounded-[18px] border border-[rgba(118,31,47,0.18)] bg-[rgba(118,31,47,0.06)] px-4 py-3 text-sm text-[rgb(var(--wine))]">
+                {topFutureStaysError}
+              </div>
+            ) : null}
+
+            <div className="mt-6 flex justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setIsTopFutureStaysOpen(false)}
+                className="rounded-full border border-[rgba(118,31,47,0.16)] bg-white/82 px-5 py-2.5 text-sm font-semibold text-[rgb(var(--page-foreground))] transition hover:bg-[rgba(118,31,47,0.06)]"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveTopFutureStays}
+                className="rounded-full bg-[rgb(var(--wine))] px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-[#004f8d]"
+              >
+                Save top 3 future stays
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {isTopExperiencesOpen ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-[rgba(42,18,22,0.48)] px-4 py-8 backdrop-blur-sm">
+          <div className="glass-panel max-h-[calc(100vh-3rem)] w-full max-w-3xl overflow-y-auto rounded-[30px] p-5 sm:p-7">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="section-label">Top 3 Experiences</p>
+                <h2 className="mt-2 text-2xl font-semibold leading-none text-[rgb(var(--page-foreground))] font-[family:var(--font-display)] sm:text-4xl">
+                  Build your most memorable list
+                </h2>
+                <div className="mt-2 text-sm text-[rgba(34,58,86,0.62)]">
+                  Pick the stays that stand out most, add a short description, and optionally paste a photo URL.
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsTopExperiencesOpen(false)}
+                className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-[rgba(118,31,47,0.16)] bg-white/80 text-lg text-[rgb(var(--wine))] transition hover:bg-[rgba(118,31,47,0.06)]"
+                aria-label="Close top 3 experiences"
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="mt-6 space-y-4">
+              {topExperiencesDraft.map((slot, index) => (
+                <div key={slot.rank} className="rounded-[24px] border border-[rgba(0,102,179,0.1)] bg-white/68 p-4">
+                  <div className="mb-3 text-sm font-semibold uppercase tracking-[0.14em] text-[rgba(34,58,86,0.58)]">
+                    Rank #{slot.rank}
+                  </div>
+                  <div className="grid gap-3 md:grid-cols-2">
+                    <label className="space-y-2">
+                      <span className="text-sm font-semibold text-[rgb(var(--page-foreground))]">Hotel</span>
+                      <select
+                        value={slot.hotelId}
+                        onChange={(event) =>
+                          setTopExperiencesDraft((current) =>
+                            current.map((item, itemIndex) =>
+                              itemIndex === index ? { ...item, hotelId: event.target.value } : item
+                            )
+                          )
+                        }
+                        className="w-full rounded-[16px] border border-[rgba(118,31,47,0.14)] bg-white/90 px-4 py-3 text-sm text-[rgb(var(--page-foreground))] outline-none transition focus:border-[rgba(118,31,47,0.32)] focus:ring-4 focus:ring-[rgba(118,31,47,0.08)]"
+                      >
+                        <option value="">Select a hotel</option>
+                        {exploredHotels.map((hotel) => (
+                          <option key={hotel.id} value={hotel.id}>
+                            {hotel.name}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+
+                    <label className="space-y-2">
+                      <span className="text-sm font-semibold text-[rgb(var(--page-foreground))]">Photo URL</span>
+                      <input
+                        value={slot.imageUrl}
+                        onChange={(event) =>
+                          setTopExperiencesDraft((current) =>
+                            current.map((item, itemIndex) =>
+                              itemIndex === index ? { ...item, imageUrl: event.target.value } : item
+                            )
+                          )
+                        }
+                        placeholder="Paste an image URL"
+                        className="w-full rounded-[16px] border border-[rgba(118,31,47,0.14)] bg-white/90 px-4 py-3 text-sm text-[rgb(var(--page-foreground))] outline-none transition focus:border-[rgba(118,31,47,0.32)] focus:ring-4 focus:ring-[rgba(118,31,47,0.08)]"
+                      />
+                    </label>
+
+                    <label className="space-y-2 md:col-span-2">
+                      <span className="text-sm font-semibold text-[rgb(var(--page-foreground))]">Description</span>
+                      <input
+                        value={slot.description}
+                        onChange={(event) =>
+                          setTopExperiencesDraft((current) =>
+                            current.map((item, itemIndex) =>
+                              itemIndex === index ? { ...item, description: event.target.value } : item
+                            )
+                          )
+                        }
+                        placeholder="Short one-line highlight"
+                        maxLength={120}
+                        className="w-full rounded-[16px] border border-[rgba(118,31,47,0.14)] bg-white/90 px-4 py-3 text-sm text-[rgb(var(--page-foreground))] outline-none transition focus:border-[rgba(118,31,47,0.32)] focus:ring-4 focus:ring-[rgba(118,31,47,0.08)]"
+                      />
+                    </label>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {topExperiencesError ? (
+              <div className="mt-4 rounded-[18px] border border-[rgba(118,31,47,0.18)] bg-[rgba(118,31,47,0.06)] px-4 py-3 text-sm text-[rgb(var(--wine))]">
+                {topExperiencesError}
+              </div>
+            ) : null}
+
+            <div className="mt-6 flex justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setIsTopExperiencesOpen(false)}
+                className="rounded-full border border-[rgba(118,31,47,0.16)] bg-white/82 px-5 py-2.5 text-sm font-semibold text-[rgb(var(--page-foreground))] transition hover:bg-[rgba(118,31,47,0.06)]"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveTopExperiences}
+                className="rounded-full bg-[rgb(var(--wine))] px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-[#004f8d]"
+              >
+                Save top 3 experiences
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {isTopUnderratedOpen ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-[rgba(42,18,22,0.48)] px-4 py-8 backdrop-blur-sm">
+          <div className="glass-panel max-h-[calc(100vh-3rem)] w-full max-w-4xl overflow-y-auto rounded-[30px] p-5 sm:p-7">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="section-label">Top 3 Underrated</p>
+                <h2 className="mt-2 text-2xl font-semibold leading-none text-[rgb(var(--page-foreground))] font-[family:var(--font-display)] sm:text-4xl">
+                  Build your hidden gems list
+                </h2>
+                <div className="mt-2 text-sm text-[rgba(34,58,86,0.62)]">
+                  Pick three hotels you think deserve more love and optionally paste a photo URL.
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsTopUnderratedOpen(false)}
+                className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-[rgba(118,31,47,0.16)] bg-white/80 text-lg text-[rgb(var(--wine))] transition hover:bg-[rgba(118,31,47,0.06)]"
+                aria-label="Close top 3 underrated"
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="mt-6 space-y-4">
+              {topUnderratedDraft.map((slot, index) => (
+                <div key={slot.rank} className="rounded-[24px] border border-[rgba(0,102,179,0.1)] bg-white/68 p-4">
+                  <div className="mb-3 text-sm font-semibold uppercase tracking-[0.14em] text-[rgba(34,58,86,0.58)]">
+                    Rank #{slot.rank}
+                  </div>
+                  <div className="grid gap-3 md:grid-cols-2">
+                    <label className="space-y-2">
+                      <span className="text-sm font-semibold text-[rgb(var(--page-foreground))]">Hotel</span>
+                      <select
+                        value={slot.hotelId}
+                        onChange={(event) =>
+                          setTopUnderratedDraft((current) =>
+                            current.map((item, itemIndex) =>
+                              itemIndex === index ? { ...item, hotelId: event.target.value } : item
+                            )
+                          )
+                        }
+                        className="w-full rounded-[16px] border border-[rgba(118,31,47,0.14)] bg-white/90 px-4 py-3 text-sm text-[rgb(var(--page-foreground))] outline-none transition focus:border-[rgba(118,31,47,0.32)] focus:ring-4 focus:ring-[rgba(118,31,47,0.08)]"
+                      >
+                        <option value="">Select a hotel</option>
+                        {exploredHotels.map((hotel) => (
+                          <option key={hotel.id} value={hotel.id}>
+                            {hotel.name}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+
+                    <label className="space-y-2">
+                      <span className="text-sm font-semibold text-[rgb(var(--page-foreground))]">Photo URL</span>
+                      <input
+                        value={slot.imageUrl}
+                        onChange={(event) =>
+                          setTopUnderratedDraft((current) =>
+                            current.map((item, itemIndex) =>
+                              itemIndex === index ? { ...item, imageUrl: event.target.value } : item
+                            )
+                          )
+                        }
+                        placeholder="Paste an image URL"
+                        className="w-full rounded-[16px] border border-[rgba(118,31,47,0.14)] bg-white/90 px-4 py-3 text-sm text-[rgb(var(--page-foreground))] outline-none transition focus:border-[rgba(118,31,47,0.32)] focus:ring-4 focus:ring-[rgba(118,31,47,0.08)]"
+                      />
+                    </label>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {topUnderratedError ? (
+              <div className="mt-4 rounded-[18px] border border-[rgba(118,31,47,0.18)] bg-[rgba(118,31,47,0.06)] px-4 py-3 text-sm text-[rgb(var(--wine))]">
+                {topUnderratedError}
+              </div>
+            ) : null}
+
+            <div className="mt-6 flex justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setIsTopUnderratedOpen(false)}
+                className="rounded-full border border-[rgba(118,31,47,0.16)] bg-white/82 px-5 py-2.5 text-sm font-semibold text-[rgb(var(--page-foreground))] transition hover:bg-[rgba(118,31,47,0.06)]"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveTopUnderrated}
+                className="rounded-full bg-[rgb(var(--wine))] px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-[#004f8d]"
+              >
+                Save top 3 underrated
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {isTopReturnStaysOpen ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-[rgba(42,18,22,0.48)] px-4 py-8 backdrop-blur-sm">
+          <div className="glass-panel max-h-[calc(100vh-3rem)] w-full max-w-4xl overflow-y-auto rounded-[30px] p-5 sm:p-7">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="section-label">Top 3 Return Stays</p>
+                <h2 className="mt-2 text-2xl font-semibold leading-none text-[rgb(var(--page-foreground))] font-[family:var(--font-display)] sm:text-4xl">
+                  Build your would-stay-again list
+                </h2>
+                <div className="mt-2 text-sm text-[rgba(34,58,86,0.62)]">
+                  Pick the three hotels you would gladly return to and optionally paste a photo URL.
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsTopReturnStaysOpen(false)}
+                className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-[rgba(118,31,47,0.16)] bg-white/80 text-lg text-[rgb(var(--wine))] transition hover:bg-[rgba(118,31,47,0.06)]"
+                aria-label="Close top 3 return stays"
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="mt-6 space-y-4">
+              {topReturnStaysDraft.map((slot, index) => (
+                <div key={slot.rank} className="rounded-[24px] border border-[rgba(0,102,179,0.1)] bg-white/68 p-4">
+                  <div className="mb-3 text-sm font-semibold uppercase tracking-[0.14em] text-[rgba(34,58,86,0.58)]">
+                    Rank #{slot.rank}
+                  </div>
+                  <div className="grid gap-3 md:grid-cols-2">
+                    <label className="space-y-2">
+                      <span className="text-sm font-semibold text-[rgb(var(--page-foreground))]">Hotel</span>
+                      <select
+                        value={slot.hotelId}
+                        onChange={(event) =>
+                          setTopReturnStaysDraft((current) =>
+                            current.map((item, itemIndex) =>
+                              itemIndex === index ? { ...item, hotelId: event.target.value } : item
+                            )
+                          )
+                        }
+                        className="w-full rounded-[16px] border border-[rgba(118,31,47,0.14)] bg-white/90 px-4 py-3 text-sm text-[rgb(var(--page-foreground))] outline-none transition focus:border-[rgba(118,31,47,0.32)] focus:ring-4 focus:ring-[rgba(118,31,47,0.08)]"
+                      >
+                        <option value="">Select a hotel</option>
+                        {exploredHotels.map((hotel) => (
+                          <option key={hotel.id} value={hotel.id}>
+                            {hotel.name}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+
+                    <label className="space-y-2">
+                      <span className="text-sm font-semibold text-[rgb(var(--page-foreground))]">Photo URL</span>
+                      <input
+                        value={slot.imageUrl}
+                        onChange={(event) =>
+                          setTopReturnStaysDraft((current) =>
+                            current.map((item, itemIndex) =>
+                              itemIndex === index ? { ...item, imageUrl: event.target.value } : item
+                            )
+                          )
+                        }
+                        placeholder="Paste an image URL"
+                        className="w-full rounded-[16px] border border-[rgba(118,31,47,0.14)] bg-white/90 px-4 py-3 text-sm text-[rgb(var(--page-foreground))] outline-none transition focus:border-[rgba(118,31,47,0.32)] focus:ring-4 focus:ring-[rgba(118,31,47,0.08)]"
+                      />
+                    </label>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {topReturnStaysError ? (
+              <div className="mt-4 rounded-[18px] border border-[rgba(118,31,47,0.18)] bg-[rgba(118,31,47,0.06)] px-4 py-3 text-sm text-[rgb(var(--wine))]">
+                {topReturnStaysError}
+              </div>
+            ) : null}
+
+            <div className="mt-6 flex justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setIsTopReturnStaysOpen(false)}
+                className="rounded-full border border-[rgba(118,31,47,0.16)] bg-white/82 px-5 py-2.5 text-sm font-semibold text-[rgb(var(--page-foreground))] transition hover:bg-[rgba(118,31,47,0.06)]"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveTopReturnStays}
+                className="rounded-full bg-[rgb(var(--wine))] px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-[#004f8d]"
+              >
+                Save top 3 return stays
               </button>
             </div>
           </div>

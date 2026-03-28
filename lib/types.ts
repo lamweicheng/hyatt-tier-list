@@ -31,3 +31,78 @@ export type HotelRecord = HotelDraft & {
 };
 
 export type PersistenceMode = 'database' | 'local';
+
+export type TopPickRank = 1 | 2 | 3;
+
+export type TopPickSlot = {
+  rank: TopPickRank;
+  hotelId: string;
+  imageUrl: string;
+};
+
+export type TopSuiteSlot = {
+  rank: TopPickRank;
+  hotelId: string;
+  suiteName: string;
+  imageUrl: string;
+};
+
+export type TopFutureStaySlot = {
+  rank: TopPickRank;
+  hotelId: string;
+  location: string;
+  imageUrl: string;
+};
+
+export type TopExperienceSlot = {
+  rank: TopPickRank;
+  hotelId: string;
+  description: string;
+  imageUrl: string;
+};
+
+export type TopUnderratedSlot = {
+  rank: TopPickRank;
+  hotelId: string;
+  imageUrl: string;
+};
+
+export type TopReturnStaySlot = {
+  rank: TopPickRank;
+  hotelId: string;
+  imageUrl: string;
+};
+
+export type DashboardSectionId =
+  | 'topHotels'
+  | 'topSuites'
+  | 'tierBoard'
+  | 'futureHotels'
+  | 'topFutureStays'
+  | 'topExperiences'
+  | 'topUnderrated'
+  | 'topReturnStays';
+
+export type DisplayPreferences = {
+  showTopHotels: boolean;
+  showTopSuites: boolean;
+  showTierBoard: boolean;
+  showFutureHotels: boolean;
+  showTopFutureStays: boolean;
+  showTopExperiences: boolean;
+  showTopUnderrated: boolean;
+  showTopReturnStays: boolean;
+  sectionOrder: DashboardSectionId[];
+};
+
+export type DashboardPreferencesRecord = {
+  topPicks: TopPickSlot[];
+  topSuites: TopSuiteSlot[];
+  topFutureStays: TopFutureStaySlot[];
+  topExperiences: TopExperienceSlot[];
+  topUnderrated: TopUnderratedSlot[];
+  topReturnStays: TopReturnStaySlot[];
+  displayPreferences: DisplayPreferences;
+};
+
+export type DashboardPreferencesPatch = Partial<DashboardPreferencesRecord>;
