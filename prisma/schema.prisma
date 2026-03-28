@@ -28,6 +28,7 @@ model Hotel {
   stayType  StayType @default(EXPLORED)
   tier      Tier?
   roomEntries Json?
+  stayEntries Json?
   locationCity String?
   locationCountry String?
   addressLine1 String?

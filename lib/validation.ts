@@ -5,6 +5,12 @@ const BRAND_NAMES = HYATT_BRANDS.map((brand) => brand.name) as [string, ...strin
 const STAY_TYPES = ['EXPLORED', 'FUTURE'] as const;
 const ROOM_ENTRY_KINDS = ['ROOM', 'SUITE'] as const;
 
+const stayEntrySchema = z.object({
+  id: z.string().trim().min(1).optional(),
+  month: z.number().int().min(1, 'Month is required').max(12, 'Month must be between 1 and 12'),
+  year: z.number().int().min(1900, 'Year must be 1900 or later').max(2100, 'Year must be 2100 or earlier')
+});
+
 const roomEntrySchema = z.object({
   label: z.string().trim().min(1, 'Room type is required').max(80, 'Max 80 characters'),
   kind: z.enum(ROOM_ENTRY_KINDS)
@@ -18,7 +24,8 @@ export const hotelFormSchema = z
     }),
     stayType: z.enum(STAY_TYPES),
     tier: z.enum(TIERS).nullable(),
-    roomEntries: z.array(roomEntrySchema).default([])
+    roomEntries: z.array(roomEntrySchema).default([]),
+    stayEntries: z.array(stayEntrySchema).default([])
   })
   .superRefine((value, ctx) => {
     if (value.stayType === 'EXPLORED' && !value.tier) {
@@ -34,7 +41,15 @@ export const hotelFormSchema = z
     roomEntries: value.roomEntries.map((entry) => ({
       label: entry.label.trim(),
       kind: entry.kind
-    }))
+    })),
+    stayEntries:
+      value.stayType === 'EXPLORED'
+        ? value.stayEntries.map((entry) => ({
+            id: entry.id?.trim() || crypto.randomUUID(),
+            month: entry.month,
+            year: entry.year
+          }))
+        : []
   }));
 
 export type HotelFormPayload = z.infer<typeof hotelFormSchema>;
@@ -98,6 +113,7 @@ const dashboardSectionIdSchema = z.union([
   z.literal('topSuites'),
   z.literal('tierBoard'),
   z.literal('futureHotels'),
+  z.literal('travelTimeline'),
   z.literal('topFutureStays'),
   z.literal('topExperiences'),
   z.literal('topUnderrated'),
@@ -109,11 +125,12 @@ const displayPreferencesSchema = z.object({
   showTopSuites: z.boolean(),
   showTierBoard: z.boolean(),
   showFutureHotels: z.boolean(),
+  showTravelTimeline: z.boolean(),
   showTopFutureStays: z.boolean(),
   showTopExperiences: z.boolean(),
   showTopUnderrated: z.boolean(),
   showTopReturnStays: z.boolean(),
-  sectionOrder: z.array(dashboardSectionIdSchema).length(8)
+  sectionOrder: z.array(dashboardSectionIdSchema).length(9)
 });
 
 export const dashboardPreferencesSchema = z.object({

@@ -9,25 +9,26 @@ export type DashboardMenuSection = {
   description: string;
   shown: boolean;
   toggle: () => void;
-  hasCompactToggle?: boolean;
+  compactToggle?: {
+    active: boolean;
+    toggle: () => void;
+    activeLabel: string;
+    inactiveLabel: string;
+  };
 };
 
 export function DashboardMenuModal({
   isOpen,
   sections,
   sectionOrder,
-  isCompactMode,
   onClose,
-  onToggleCompact,
   onReset,
   onReorder
 }: {
   isOpen: boolean;
   sections: DashboardMenuSection[];
   sectionOrder: DashboardSectionId[];
-  isCompactMode: boolean;
   onClose: () => void;
-  onToggleCompact: () => void;
   onReset: () => void;
   onReorder: (draggedId: DashboardSectionId, targetId: DashboardSectionId) => void;
 }) {
@@ -51,7 +52,7 @@ export function DashboardMenuModal({
               Customize your dashboard
             </h2>
             <div className="mt-2 text-sm text-[rgba(34,58,86,0.62)]">
-              Show or hide sections, drag cards to reorder them, and switch compact mode for the tier board.
+              Show or hide sections, drag cards to reorder them, and switch compact layouts where available.
             </div>
           </div>
           <button
@@ -140,14 +141,16 @@ export function DashboardMenuModal({
                     <div className="rounded-full border border-[rgba(0,102,179,0.18)] bg-white/85 px-3 py-2 text-xs font-semibold uppercase tracking-[0.14em] text-[rgba(34,58,86,0.62)]">
                       Drag to move
                     </div>
-                    {section.hasCompactToggle ? (
+                    {section.compactToggle ? (
                       <button
                         type="button"
-                        onClick={onToggleCompact}
-                        aria-pressed={isCompactMode}
+                        onClick={section.compactToggle.toggle}
+                        aria-pressed={section.compactToggle.active}
                         className="rounded-full border border-[rgba(0,102,179,0.18)] bg-white/85 px-4 py-2 text-xs font-semibold uppercase tracking-[0.14em] text-[rgb(var(--wine))]"
                       >
-                        {isCompactMode ? 'Compact on' : 'Compact off'}
+                        {section.compactToggle.active
+                          ? section.compactToggle.activeLabel
+                          : section.compactToggle.inactiveLabel}
                       </button>
                     ) : null}
                   </div>

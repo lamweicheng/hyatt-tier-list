@@ -9,6 +9,12 @@ export type RoomEntry = {
   kind: RoomEntryKind;
 };
 
+export type StayEntry = {
+  id: string;
+  month: number;
+  year: number;
+};
+
 export type HyattBrand = {
   name: string;
   color: string;
@@ -21,6 +27,7 @@ export type HotelDraft = {
   stayType: StayType;
   tier: Tier | null;
   roomEntries: RoomEntry[];
+  stayEntries: StayEntry[];
 };
 
 export type HotelRecord = HotelDraft & {
@@ -78,6 +85,7 @@ export type DashboardSectionId =
   | 'topSuites'
   | 'tierBoard'
   | 'futureHotels'
+  | 'travelTimeline'
   | 'topFutureStays'
   | 'topExperiences'
   | 'topUnderrated'
@@ -88,6 +96,7 @@ export type DisplayPreferences = {
   showTopSuites: boolean;
   showTierBoard: boolean;
   showFutureHotels: boolean;
+  showTravelTimeline: boolean;
   showTopFutureStays: boolean;
   showTopExperiences: boolean;
   showTopUnderrated: boolean;

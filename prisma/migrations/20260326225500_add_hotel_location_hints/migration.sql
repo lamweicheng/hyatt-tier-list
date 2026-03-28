@@ -1,4 +1,6 @@
 -- AlterTable
 ALTER TABLE "Hotel"
-ADD COLUMN "locationCity" TEXT,
-ADD COLUMN "locationCountry" TEXT;
+ADD COLUMN IF NOT EXISTS "locationCity" TEXT;
+
+ALTER TABLE "Hotel"
+ADD COLUMN IF NOT EXISTS "locationCountry" TEXT;

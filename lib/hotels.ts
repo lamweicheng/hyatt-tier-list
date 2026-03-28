@@ -3,7 +3,7 @@ import 'server-only';
 import { ZodError } from 'zod';
 import { sortHotelsByTier } from './hyatt-data';
 import { getPrismaClient } from './prisma';
-import type { HotelDraft, HotelRecord, RoomEntry } from './types';
+import type { HotelDraft, HotelRecord, RoomEntry, StayEntry } from './types';
 import { hotelFormSchema, hotelReorderSchema } from './validation';
 
 export function isDatabaseConfigured() {
@@ -17,6 +17,7 @@ function toHotelRecord(hotel: {
   stayType: string;
   tier: string | null;
   roomEntries: unknown;
+  stayEntries: unknown;
   position: number;
   createdAt: Date;
   updatedAt: Date;
@@ -37,6 +38,31 @@ function toHotelRecord(hotel: {
         }))
     : [];
 
+  const stayEntries = Array.isArray(hotel.stayEntries)
+    ? hotel.stayEntries
+        .filter((entry): entry is StayEntry => {
+          if (typeof entry !== 'object' || entry === null) {
+            return false;
+          }
+
+          const record = entry as Record<string, unknown>;
+          return (
+            typeof record.id === 'string' &&
+            typeof record.month === 'number' &&
+            Number.isInteger(record.month) &&
+            record.month >= 1 &&
+            record.month <= 12 &&
+            typeof record.year === 'number' &&
+            Number.isInteger(record.year)
+          );
+        })
+        .map((entry) => ({
+          id: entry.id,
+          month: entry.month,
+          year: entry.year
+        }))
+    : [];
+
   return {
     id: hotel.id,
     name: hotel.name,
@@ -44,6 +70,7 @@ function toHotelRecord(hotel: {
     stayType: hotel.stayType as HotelRecord['stayType'],
     tier: hotel.tier as HotelRecord['tier'],
     roomEntries,
+    stayEntries,
     position: hotel.position,
     createdAt: hotel.createdAt.toISOString(),
     updatedAt: hotel.updatedAt.toISOString()
@@ -77,7 +104,8 @@ export async function createHotel(payload: HotelDraft) {
     data: {
       ...data,
       position: await getNextHotelPosition(data.stayType, data.tier),
-      roomEntries: data.roomEntries
+      roomEntries: data.roomEntries,
+      stayEntries: data.stayEntries
     }
   });
   return toHotelRecord(hotel);
@@ -100,6 +128,7 @@ export async function updateHotel(id: string, payload: HotelDraft) {
     data: {
       ...data,
       roomEntries: data.roomEntries,
+      stayEntries: data.stayEntries,
       position: nextPosition
     }
   });

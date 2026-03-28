@@ -15,6 +15,7 @@ import type {
   PersistenceMode,
   RoomEntry,
   RoomEntryKind,
+  StayEntry,
   StayType,
   Tier,
   TopExperienceSlot,
@@ -40,12 +41,34 @@ const DEFAULT_DRAFT: HotelDraft = {
   brand: HYATT_BRANDS[0].name,
   stayType: 'EXPLORED',
   tier: 'S',
-  roomEntries: []
+  roomEntries: [],
+  stayEntries: []
 };
 
 const EMPTY_ROOM_ENTRY: RoomEntry = {
   label: '',
   kind: 'SUITE'
+};
+
+const MONTH_LABELS = [
+  'January',
+  'February',
+  'March',
+  'April',
+  'May',
+  'June',
+  'July',
+  'August',
+  'September',
+  'October',
+  'November',
+  'December'
+] as const;
+
+const EMPTY_STAY_ENTRY: StayEntry = {
+  id: crypto.randomUUID(),
+  month: new Date().getMonth() + 1,
+  year: new Date().getFullYear()
 };
 
 const ROOM_KIND_OPTIONS: Array<{ value: RoomEntryKind; label: string }> = [
@@ -57,6 +80,11 @@ const STAY_TYPE_OPTIONS: Array<{ value: StayType; label: string }> = [
   { value: 'EXPLORED', label: 'Explored' },
   { value: 'FUTURE', label: 'Future' }
 ];
+
+const MONTH_OPTIONS = MONTH_LABELS.map((label, index) => ({
+  value: String(index + 1),
+  label
+}));
 
 const TIER_STYLES: Record<
   Tier,
@@ -123,6 +151,22 @@ type BrandVisualStyle = {
   shadowColor: string;
 };
 
+type TopOverviewItem = {
+  rank: TopPickRank;
+  hotel: HotelRecord;
+  imageUrl: string;
+  title: string;
+  imageLabel?: string;
+};
+
+type TopOverviewSection = {
+  id: string;
+  label: string;
+  title: string;
+  emptyMessage: string;
+  items: TopOverviewItem[];
+};
+
 const DEFAULT_TOP_PICKS: TopPickSlot[] = [
   { rank: 1, hotelId: '', imageUrl: '' },
   { rank: 2, hotelId: '', imageUrl: '' },
@@ -164,6 +208,7 @@ const DEFAULT_SECTION_ORDER: DashboardSectionId[] = [
   'topSuites',
   'tierBoard',
   'futureHotels',
+  'travelTimeline',
   'topFutureStays',
   'topExperiences',
   'topUnderrated',
@@ -175,6 +220,7 @@ const DEFAULT_DISPLAY_PREFERENCES: DisplayPreferences = {
   showTopSuites: true,
   showTierBoard: true,
   showFutureHotels: true,
+  showTravelTimeline: true,
   showTopFutureStays: true,
   showTopExperiences: true,
   showTopUnderrated: true,
@@ -202,6 +248,31 @@ function normalizeRoomEntries(value: unknown): RoomEntry[] {
     .filter((entry) => entry.label.trim().length > 0);
 }
 
+function normalizeStayEntries(value: unknown): StayEntry[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .filter((entry): entry is Record<string, unknown> => typeof entry === 'object' && entry !== null)
+    .map<StayEntry | null>((entry) => {
+      const month = typeof entry.month === 'number' ? entry.month : Number(entry.month);
+      const year = typeof entry.year === 'number' ? entry.year : Number(entry.year);
+
+      if (!Number.isInteger(month) || month < 1 || month > 12 || !Number.isInteger(year) || year < 1900) {
+        return null;
+      }
+
+      return {
+        id: typeof entry.id === 'string' && entry.id ? entry.id : crypto.randomUUID(),
+        month,
+        year
+      };
+    })
+    .filter((entry): entry is StayEntry => entry !== null)
+    .sort((left, right) => right.year - left.year || right.month - left.month);
+}
+
 function normalizeHotelRecord(value: unknown): HotelRecord {
   const raw = (typeof value === 'object' && value !== null ? value : {}) as Record<string, unknown>;
   const stayType: StayType = raw.stayType === 'FUTURE' ? 'FUTURE' : 'EXPLORED';
@@ -218,6 +289,7 @@ function normalizeHotelRecord(value: unknown): HotelRecord {
     stayType,
     tier,
     roomEntries: normalizeRoomEntries(raw.roomEntries),
+    stayEntries: stayType === 'EXPLORED' ? normalizeStayEntries(raw.stayEntries) : [],
     position: typeof raw.position === 'number' && Number.isInteger(raw.position) ? raw.position : 0,
     createdAt: typeof raw.createdAt === 'string' ? raw.createdAt : timestamp,
     updatedAt: typeof raw.updatedAt === 'string' ? raw.updatedAt : timestamp
@@ -592,6 +664,10 @@ function normalizeDisplayPreferences(value: unknown): DisplayPreferences {
       typeof record.showFutureHotels === 'boolean'
         ? record.showFutureHotels
         : DEFAULT_DISPLAY_PREFERENCES.showFutureHotels,
+    showTravelTimeline:
+      typeof record.showTravelTimeline === 'boolean'
+        ? record.showTravelTimeline
+        : DEFAULT_DISPLAY_PREFERENCES.showTravelTimeline,
     showTopFutureStays:
       typeof record.showTopFutureStays === 'boolean'
         ? record.showTopFutureStays
@@ -684,10 +760,12 @@ export function HyattTierListClient({
   const [dropTarget, setDropTarget] = useState<DropTargetState>(null);
   const [recentlyDraggedHotelId, setRecentlyDraggedHotelId] = useState<string | null>(null);
   const [isCompactMode, setIsCompactMode] = useState(false);
+  const [isTravelTimelineCompactMode, setIsTravelTimelineCompactMode] = useState(false);
   const [isAllBrandsOpen, setIsAllBrandsOpen] = useState(false);
   const [isExploredBrandsOpen, setIsExploredBrandsOpen] = useState(false);
   const [isFutureBrandsOpen, setIsFutureBrandsOpen] = useState(false);
   const [isSuitesOpen, setIsSuitesOpen] = useState(false);
+  const [isTopOverviewOpen, setIsTopOverviewOpen] = useState(false);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [isTopPicksOpen, setIsTopPicksOpen] = useState(false);
   const [isTopSuitesOpen, setIsTopSuitesOpen] = useState(false);
@@ -1022,6 +1100,155 @@ export function HyattTierListClient({
     [exploredHotels, topReturnStays]
   );
   const hasCompleteTopReturnStays = topReturnStaysResolved.length === 3 && topReturnStays.every((slot) => slot.hotelId);
+  const topOverviewSections = useMemo<TopOverviewSection[]>(
+    () => [
+      {
+        id: 'top-hotels',
+        label: 'Top 3 Hotels',
+        title: 'Best Overall',
+        emptyMessage: 'No hotel podium picks yet.',
+        items: topPicksResolved.flatMap((slot) =>
+          slot.hotel
+            ? [
+                {
+                  rank: slot.rank,
+                  hotel: slot.hotel,
+                  imageUrl: slot.imageUrl,
+                  title: slot.hotel.name
+                }
+              ]
+            : []
+        )
+      },
+      {
+        id: 'top-suites',
+        label: 'Top 3 Suites',
+        title: 'Favorite Suites',
+        emptyMessage: 'No suite podium picks yet.',
+        items: topSuitesResolved.flatMap((slot) =>
+          slot.hotel
+            ? [
+                {
+                  rank: slot.rank,
+                  hotel: slot.hotel,
+                  imageUrl: slot.imageUrl,
+                  title: slot.hotel.name,
+                  imageLabel: slot.suiteName || undefined
+                }
+              ]
+            : []
+        )
+      },
+      {
+        id: 'top-future-stays',
+        label: 'Top 3 Future Stays',
+        title: 'Most Anticipated',
+        emptyMessage: 'No future-stay podium picks yet.',
+        items: topFutureStaysResolved.flatMap((slot) =>
+          slot.hotel
+            ? [
+                {
+                  rank: slot.rank,
+                  hotel: slot.hotel,
+                  imageUrl: slot.imageUrl,
+                  title: slot.hotel.name
+                }
+              ]
+            : []
+        )
+      },
+      {
+        id: 'top-experiences',
+        label: 'Top 3 Experiences',
+        title: 'Most Memorable',
+        emptyMessage: 'No memorable experiences picked yet.',
+        items: topExperiencesResolved.flatMap((slot) =>
+          slot.hotel
+            ? [
+                {
+                  rank: slot.rank,
+                  hotel: slot.hotel,
+                  imageUrl: slot.imageUrl,
+                  title: slot.hotel.name
+                }
+              ]
+            : []
+        )
+      },
+      {
+        id: 'top-underrated',
+        label: 'Top 3 Underrated',
+        title: 'Hidden Gems',
+        emptyMessage: 'No underrated picks yet.',
+        items: topUnderratedResolved.flatMap((slot) =>
+          slot.hotel
+            ? [
+                {
+                  rank: slot.rank,
+                  hotel: slot.hotel,
+                  imageUrl: slot.imageUrl,
+                  title: slot.hotel.name
+                }
+              ]
+            : []
+        )
+      },
+      {
+        id: 'top-return-stays',
+        label: 'Top 3 Return Stays',
+        title: 'Would Stay Again',
+        emptyMessage: 'No return-stay picks yet.',
+        items: topReturnStaysResolved.flatMap((slot) =>
+          slot.hotel
+            ? [
+                {
+                  rank: slot.rank,
+                  hotel: slot.hotel,
+                  imageUrl: slot.imageUrl,
+                  title: slot.hotel.name
+                }
+              ]
+            : []
+        )
+      }
+    ],
+    [
+      topExperiencesResolved,
+      topFutureStaysResolved,
+      topPicksResolved,
+      topReturnStaysResolved,
+      topSuitesResolved,
+      topUnderratedResolved
+    ]
+  );
+  const travelTimelineYears = useMemo(() => {
+    const flattened = exploredHotels.flatMap((hotel) =>
+      hotel.stayEntries.map((stayEntry) => ({
+        ...stayEntry,
+        hotel
+      }))
+    );
+
+    flattened.sort(
+      (left, right) =>
+        right.year - left.year ||
+        right.month - left.month ||
+        left.hotel.position - right.hotel.position ||
+        left.hotel.name.localeCompare(right.hotel.name)
+    );
+
+    const years = new Map<number, typeof flattened>();
+
+    flattened.forEach((entry) => {
+      const collection = years.get(entry.year) ?? [];
+      collection.push(entry);
+      years.set(entry.year, collection);
+    });
+
+    return Array.from(years.entries())
+      .sort((left, right) => right[0] - left[0])
+      .map(([year, stays]) => ({ year, stays }));
+  }, [exploredHotels]);
   const summaryCards = [
     { label: 'Hotels Explored', value: exploredHotels.length },
     { label: 'Brands Explored', value: `${exploredBrandCount}/${HYATT_BRANDS.length}` },
@@ -1061,7 +1288,12 @@ export function HyattTierListClient({
       label: 'Tier Board',
       description: 'Control visibility and compact mode together.',
       shown: displayPreferences.showTierBoard,
-      hasCompactToggle: true,
+      compactToggle: {
+        active: isCompactMode,
+        toggle: () => setIsCompactMode((current) => !current),
+        activeLabel: 'Compact on',
+        inactiveLabel: 'Compact off'
+      },
       toggle: () =>
         void updateDisplayPreferences({
           ...displayPreferences,
@@ -1077,6 +1309,23 @@ export function HyattTierListClient({
         void updateDisplayPreferences({
           ...displayPreferences,
           showFutureHotels: !displayPreferences.showFutureHotels
+        })
+    },
+    {
+      id: 'travelTimeline' as const,
+      label: 'Travel Timeline',
+      description: 'Show or hide your year-by-year stay log.',
+      shown: displayPreferences.showTravelTimeline,
+      compactToggle: {
+        active: isTravelTimelineCompactMode,
+        toggle: () => setIsTravelTimelineCompactMode((current) => !current),
+        activeLabel: 'Compact on',
+        inactiveLabel: 'Compact off'
+      },
+      toggle: () =>
+        void updateDisplayPreferences({
+          ...displayPreferences,
+          showTravelTimeline: !displayPreferences.showTravelTimeline
         })
     },
     {
@@ -1478,6 +1727,7 @@ export function HyattTierListClient({
   async function resetDashboardLayout() {
     await updateDisplayPreferences({ ...DEFAULT_DISPLAY_PREFERENCES, sectionOrder: [...DEFAULT_SECTION_ORDER] });
     setIsCompactMode(false);
+    setIsTravelTimelineCompactMode(false);
   }
 
   function openCreateModal() {
@@ -1492,7 +1742,8 @@ export function HyattTierListClient({
       brand: hotel.brand,
       stayType: hotel.stayType,
       tier: hotel.tier,
-      roomEntries: hotel.roomEntries.length ? hotel.roomEntries : []
+      roomEntries: hotel.roomEntries.length ? hotel.roomEntries : [],
+      stayEntries: hotel.stayEntries.length ? hotel.stayEntries : []
     });
     setErrorMessage(null);
     setModalState({ mode: 'edit', hotelId: hotel.id });
@@ -1674,7 +1925,24 @@ export function HyattTierListClient({
       brand: draft.brand,
       stayType: draft.stayType,
       tier: draft.stayType === 'EXPLORED' ? draft.tier ?? 'S' : null,
-      roomEntries: cleanedRoomEntries
+      roomEntries: cleanedRoomEntries,
+      stayEntries:
+        draft.stayType === 'EXPLORED'
+          ? draft.stayEntries
+              .map((entry) => ({
+                id: entry.id || crypto.randomUUID(),
+                month: Number(entry.month),
+                year: Number(entry.year)
+              }))
+              .filter(
+                (entry) =>
+                  Number.isInteger(entry.month) &&
+                  entry.month >= 1 &&
+                  entry.month <= 12 &&
+                  Number.isInteger(entry.year) &&
+                  entry.year >= 1900
+              )
+          : []
     };
   }
 
@@ -1753,6 +2021,29 @@ export function HyattTierListClient({
     }));
   }
 
+  function updateStayEntry(index: number, updater: (entry: StayEntry) => StayEntry) {
+    setDraft((current) => ({
+      ...current,
+      stayEntries: current.stayEntries.map((entry, entryIndex) =>
+        entryIndex === index ? updater(entry) : entry
+      )
+    }));
+  }
+
+  function addStayEntry() {
+    setDraft((current) => ({
+      ...current,
+      stayEntries: [...current.stayEntries, { ...EMPTY_STAY_ENTRY, id: crypto.randomUUID() }]
+    }));
+  }
+
+  function removeStayEntry(index: number) {
+    setDraft((current) => ({
+      ...current,
+      stayEntries: current.stayEntries.filter((_, entryIndex) => entryIndex !== index)
+    }));
+  }
+
   return (
     <main className="relative overflow-hidden px-3 py-4 sm:px-5 lg:px-6">
       <div className="pointer-events-none absolute inset-x-0 top-0 h-[34rem] bg-[radial-gradient(circle_at_top_left,rgba(179,141,78,0.2),transparent_34%),radial-gradient(circle_at_top_right,rgba(0,102,179,0.18),transparent_32%)]" />
@@ -1775,6 +2066,14 @@ export function HyattTierListClient({
               </div>
 
               <div className="flex flex-col gap-3 sm:flex-row sm:items-center lg:justify-end">
+                <button
+                  type="button"
+                  onClick={() => setIsTopOverviewOpen(true)}
+                  className="inline-flex items-center justify-center rounded-full border border-[rgba(0,102,179,0.18)] bg-white/82 px-5 py-3 text-sm font-semibold text-[rgb(var(--wine))] shadow-[0_12px_24px_rgba(26,74,122,0.08)] transition hover:-translate-y-0.5 hover:bg-[rgba(0,102,179,0.06)]"
+                  aria-label="Open all top 3 categories"
+                >
+                  All Top 3
+                </button>
                 <button
                   type="button"
                   onClick={() => setIsAllBrandsOpen(true)}
@@ -2186,6 +2485,7 @@ export function HyattTierListClient({
                 )}
               </div>
             </aside>
+
           </div>
         </section>
         ) : null}
@@ -2322,6 +2622,98 @@ export function HyattTierListClient({
               )}
             </div>
           </div>
+        </section>
+        ) : null}
+
+        {displayPreferences.showTravelTimeline ? (
+        <section className="glass-panel rounded-[28px] px-4 py-4 sm:px-5 sm:py-5" style={{ order: getSectionOrder('travelTimeline') }}>
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <p className="section-label">My Travel Timeline</p>
+            </div>
+          </div>
+
+          {travelTimelineYears.length ? (
+            <div className="mt-5 space-y-5">
+              {travelTimelineYears.map(({ year, stays }) => (
+                <section key={year} className="rounded-[24px] border border-[rgba(0,102,179,0.12)] bg-white/56 p-4 sm:p-5">
+                  <div className="flex items-center justify-between gap-3">
+                    <h3 className="text-2xl font-semibold text-[rgb(var(--page-foreground))] font-[family:var(--font-display)] sm:text-3xl">
+                      {year}
+                    </h3>
+                    <div className="rounded-full border border-white/80 bg-white/75 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-[rgba(34,58,86,0.58)]">
+                      {stays.length} stay{stays.length === 1 ? '' : 's'}
+                    </div>
+                  </div>
+
+                  <div className={isTravelTimelineCompactMode ? 'mt-4 flex min-h-[72px] flex-wrap content-start gap-1.5 sm:min-h-[80px]' : 'mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5'}>
+                    {stays.map((stay) => {
+                      const brandColor = BRAND_BY_NAME[stay.hotel.brand]?.color || '#7A1F2C';
+                      const brandStyle = getBrandVisualStyle(stay.hotel.brand, brandColor);
+
+                      return (
+                        <div
+                          key={`${stay.hotel.id}-${stay.id}`}
+                          onClick={() => handleHotelClick(stay.hotel)}
+                          onKeyDown={(event) => {
+                            if (event.key === 'Enter' || event.key === ' ') {
+                              event.preventDefault();
+                              handleHotelClick(stay.hotel);
+                            }
+                          }}
+                          role="button"
+                          tabIndex={0}
+                          className={`group border-2 text-left transition hover:-translate-y-0.5 hover:shadow-[0_14px_26px_rgba(26,74,122,0.11)] ${
+                            isTravelTimelineCompactMode ? 'rounded-[10px] px-2.5 py-1.5' : 'min-h-[68px] rounded-[16px] px-3 py-2.5 sm:min-h-[72px]'
+                          }`}
+                          style={{
+                            borderColor: brandStyle.borderColor,
+                            background: isTravelTimelineCompactMode
+                              ? `linear-gradient(135deg, ${rgba(brandStyle.dotColor, 0.16)} 0%, rgba(255,255,255,0.96) 70%)`
+                              : brandStyle.background,
+                            boxShadow: `inset 0 1px 0 rgba(255,255,255,0.8), 0 14px 30px ${brandStyle.shadowColor}`
+                          }}
+                        >
+                          <div className={`flex ${isTravelTimelineCompactMode ? 'items-center justify-start' : 'items-start justify-between'} gap-2.5`}>
+                            <div>
+                              <div className={`text-[rgb(var(--page-foreground))] transition group-hover:text-[rgb(var(--wine))] ${
+                                isTravelTimelineCompactMode
+                                  ? 'whitespace-nowrap text-[0.72rem] font-semibold leading-none sm:text-xs'
+                                  : 'line-clamp-2 text-[0.94rem] font-semibold leading-[1.3] sm:text-[0.98rem]'
+                              }`}>
+                                {stay.hotel.name}
+                              </div>
+                              {!isTravelTimelineCompactMode ? (
+                                <div className="mt-2 inline-flex rounded-full border border-[rgba(34,58,86,0.12)] bg-[rgba(255,255,255,0.78)] px-2.5 py-1 text-[0.62rem] font-semibold uppercase tracking-[0.14em] text-[rgba(34,58,86,0.62)]">
+                                  {MONTH_LABELS[stay.month - 1]}
+                                </div>
+                              ) : null}
+                            </div>
+
+                            {isTravelTimelineCompactMode ? (
+                              <div className="ml-2 inline-flex rounded-full border border-[rgba(34,58,86,0.12)] bg-[rgba(255,255,255,0.78)] px-2 py-0.5 text-[0.58rem] font-semibold uppercase tracking-[0.12em] text-[rgba(34,58,86,0.62)]">
+                                {MONTH_LABELS[stay.month - 1].slice(0, 3)}
+                              </div>
+                            ) : (
+                              <span
+                                className="mt-0.5 h-4.5 w-4.5 rounded-full border border-white/80 shadow-[inset_0_1px_0_rgba(255,255,255,0.5)]"
+                                style={{ backgroundColor: brandStyle.dotColor }}
+                                aria-label={`${stay.hotel.brand} brand color`}
+                              />
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </section>
+              ))}
+            </div>
+          ) : (
+            <div className="mt-5 rounded-[22px] border border-dashed border-[rgba(0,102,179,0.16)] bg-white/58 p-5 text-sm text-[rgba(34,58,86,0.62)]">
+              Add month and year entries to explored hotels to build your travel timeline.
+            </div>
+          )}
         </section>
         ) : null}
 
@@ -2632,12 +3024,121 @@ export function HyattTierListClient({
         isOpen={isMenuOpen}
         sections={menuSections}
         sectionOrder={displayPreferences.sectionOrder}
-        isCompactMode={isCompactMode}
         onClose={() => setIsMenuOpen(false)}
-        onToggleCompact={() => setIsCompactMode((current) => !current)}
         onReset={() => void resetDashboardLayout()}
         onReorder={(draggedId, targetId) => void reorderSections(draggedId, targetId)}
       />
+
+      {isTopOverviewOpen ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-[rgba(42,18,22,0.48)] px-4 py-8 backdrop-blur-sm">
+          <div className="glass-panel max-h-[calc(100vh-3rem)] w-full max-w-6xl overflow-hidden rounded-[30px] p-5 sm:p-7">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="section-label">Top 3 Overview</p>
+                <h2 className="mt-2 text-2xl font-semibold leading-none text-[rgb(var(--page-foreground))] font-[family:var(--font-display)] sm:text-4xl">
+                  My Personal Podiums
+                </h2>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setIsTopOverviewOpen(false)}
+                className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-[rgba(118,31,47,0.16)] bg-white/80 text-lg text-[rgb(var(--wine))] transition hover:bg-[rgba(118,31,47,0.06)]"
+                aria-label="Close all top 3 overview"
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="mt-6 max-h-[70vh] overflow-auto pr-1">
+              <div className="grid gap-4 xl:grid-cols-2">
+                {topOverviewSections.map((section) => (
+                  <section
+                    key={section.id}
+                    className="rounded-[24px] border border-[rgba(0,102,179,0.12)] bg-white/68 p-4"
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="section-label">{section.label}</p>
+                        <h3 className="mt-2 text-xl font-semibold text-[rgb(var(--page-foreground))] font-[family:var(--font-display)]">
+                          {section.title}
+                        </h3>
+                      </div>
+                    </div>
+
+                    <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
+                      {([1, 2, 3] as TopPickRank[]).map((rank) => {
+                        const item = section.items.find((entry) => entry.rank === rank);
+
+                        if (!item) {
+                          return (
+                            <div
+                              key={`${section.id}-${rank}`}
+                              className="flex min-h-[214px] flex-col justify-between rounded-[20px] border border-dashed border-[rgba(0,102,179,0.16)] bg-white/52 p-3"
+                            >
+                              <div className="inline-flex w-fit rounded-full border border-[rgba(118,31,47,0.16)] bg-white/82 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-[rgb(var(--wine))]">
+                                No. {rank}
+                              </div>
+                              <div className="text-sm leading-relaxed text-[rgba(34,58,86,0.58)]">
+                                {section.emptyMessage}
+                              </div>
+                            </div>
+                          );
+                        }
+
+                        const brandColor = BRAND_BY_NAME[item.hotel.brand]?.color ?? '#1D4ED8';
+                        return (
+                          <article
+                            key={`${section.id}-${item.rank}-${item.hotel.id}`}
+                            className="flex h-full min-h-[176px] flex-col overflow-hidden rounded-[20px] border border-white/50 bg-[rgba(255,255,255,0.84)] shadow-[0_16px_36px_rgba(26,74,122,0.12)]"
+                          >
+                            <div className="relative h-28">
+                              {item.imageUrl ? (
+                                <Image
+                                  src={item.imageUrl}
+                                  alt={item.hotel.name}
+                                  fill
+                                  unoptimized
+                                  loader={imageLoader}
+                                  sizes="(max-width: 640px) 100vw, (max-width: 1280px) 33vw, 18vw"
+                                  className="object-cover"
+                                />
+                              ) : (
+                                <div
+                                  className="h-full w-full"
+                                  style={{
+                                    background: `radial-gradient(circle at top left, ${brandColor}66, transparent 34%), linear-gradient(135deg, ${brandColor}26, rgba(18,42,68,0.18))`
+                                  }}
+                                />
+                              )}
+                              <div className="absolute inset-0 bg-gradient-to-t from-[rgba(8,18,32,0.88)] via-[rgba(12,24,40,0.2)] to-transparent" />
+                              {section.id === 'top-suites' && item.imageLabel ? (
+                                <div className="absolute left-3 top-3 max-w-[88%] rounded-[12px] border border-white/40 bg-[rgba(255,255,255,0.74)] px-3 py-1.5 text-[0.62rem] font-semibold leading-none text-[rgb(var(--wine))] shadow-[0_10px_24px_rgba(12,24,40,0.14)] backdrop-blur-sm sm:text-[0.68rem]">
+                                  <div className="truncate">{item.imageLabel}</div>
+                                </div>
+                              ) : (
+                                <div className="absolute left-3 top-3 rounded-full border border-white/70 bg-[rgba(255,255,255,0.78)] px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-[rgb(var(--wine))] shadow-[0_10px_24px_rgba(12,24,40,0.18)] backdrop-blur-md">
+                                  No. {item.rank}
+                                </div>
+                              )}
+                            </div>
+
+                            <div className="p-3">
+                              <div className="min-h-[2.7rem] text-sm font-semibold leading-[1.35] text-[rgb(var(--page-foreground))]">
+                                <div className="line-clamp-2">{item.title}</div>
+                              </div>
+                            </div>
+                          </article>
+                        );
+                      })}
+                    </div>
+                  </section>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {selectedBrand && selectedBrandHotels.length ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-[rgba(42,18,22,0.48)] px-4 py-8 backdrop-blur-sm">
@@ -3739,6 +4240,76 @@ export function HyattTierListClient({
                     </div>
                   )}
                 </div>
+
+                {draft.stayType === 'EXPLORED' ? (
+                  <div className="space-y-3 md:col-span-2">
+                    <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                      <div>
+                        <div className="text-sm font-semibold text-[rgb(var(--page-foreground))]">Travel Timeline</div>
+                        <div className="mt-1 text-xs text-[rgba(34,58,86,0.58)]">
+                          Add each month and year you stayed at this property. Multiple stays in the same month are allowed.
+                        </div>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={addStayEntry}
+                        className="inline-flex items-center justify-center whitespace-nowrap rounded-full border border-[rgba(0,102,179,0.16)] bg-white/82 px-4 py-2 text-sm font-semibold text-[rgb(var(--wine))] transition hover:bg-[rgba(0,102,179,0.06)]"
+                      >
+                        Add stay
+                      </button>
+                    </div>
+
+                    {draft.stayEntries.length ? (
+                      <div className="space-y-3">
+                        {draft.stayEntries.map((entry, index) => (
+                          <div
+                            key={entry.id}
+                            className="grid gap-3 rounded-[20px] border border-[rgba(0,102,179,0.1)] bg-white/72 p-3 md:grid-cols-[minmax(0,1fr)_9rem_auto]"
+                          >
+                            <FancySelect
+                              value={String(entry.month)}
+                              onChange={(value) =>
+                                updateStayEntry(index, (current) => ({
+                                  ...current,
+                                  month: Number(value)
+                                }))
+                              }
+                              options={MONTH_OPTIONS}
+                            />
+
+                            <input
+                              type="number"
+                              min={1900}
+                              max={2100}
+                              value={entry.year}
+                              onChange={(event) =>
+                                updateStayEntry(index, (current) => ({
+                                  ...current,
+                                  year: Number(event.target.value)
+                                }))
+                              }
+                              placeholder="2026"
+                              className="w-full rounded-[16px] border border-[rgba(118,31,47,0.14)] bg-white/92 px-4 py-3 text-sm text-[rgb(var(--page-foreground))] outline-none transition focus:border-[rgba(118,31,47,0.32)] focus:ring-4 focus:ring-[rgba(118,31,47,0.08)]"
+                            />
+
+                            <button
+                              type="button"
+                              onClick={() => removeStayEntry(index)}
+                              className="inline-flex items-center justify-center rounded-full border border-[rgba(163,33,48,0.18)] bg-[rgba(163,33,48,0.08)] px-4 py-2 text-sm font-semibold text-[#a32130] transition hover:bg-[rgba(163,33,48,0.12)]"
+                            >
+                              Remove
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="rounded-[18px] border border-dashed border-[rgba(0,102,179,0.16)] bg-white/55 p-4 text-sm text-[rgba(34,58,86,0.58)]">
+                        No stay months added yet.
+                      </div>
+                    )}
+                  </div>
+                ) : null}
               </div>
 
               {errorMessage ? (
