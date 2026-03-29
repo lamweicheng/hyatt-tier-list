@@ -1,6 +1,5 @@
 'use client';
 
-import Image from 'next/image';
 import { FormEvent, startTransition, useEffect, useMemo, useRef, useState } from 'react';
 import { BRAND_BY_NAME, BRANDS_BY_SEGMENT, HYATT_BRANDS, TIERS, sortHotelsByTier } from '@/lib/hyatt-data';
 import { FancySelect } from '@/components/ui/fancy-select';
@@ -240,7 +239,26 @@ const DEFAULT_DISPLAY_PREFERENCES: DisplayPreferences = {
   sectionOrder: DEFAULT_SECTION_ORDER
 };
 
-const imageLoader = ({ src }: { src: string }) => src;
+type UserPhotoProps = {
+  src: string;
+  alt: string;
+  className?: string;
+  eager?: boolean;
+};
+
+function UserPhoto({ src, alt, className, eager = false }: UserPhotoProps) {
+  return (
+    <img
+      src={src}
+      alt={alt}
+      loading={eager ? 'eager' : 'lazy'}
+      decoding="async"
+      referrerPolicy="no-referrer"
+      draggable={false}
+      className={className}
+    />
+  );
+}
 
 function isTier(value: unknown): value is Tier {
   return TIERS.includes(value as Tier);
@@ -1117,6 +1135,14 @@ export function HyattTierListClient({
   }, [displayPreferences.showSuiteSlideshow, loggedSuiteSlides.length]);
 
   const activeSuiteSlide = loggedSuiteSlides[activeSuiteSlideIndex] ?? null;
+  const previousSuiteSlide =
+    loggedSuiteSlides.length > 1
+      ? loggedSuiteSlides[(activeSuiteSlideIndex - 1 + loggedSuiteSlides.length) % loggedSuiteSlides.length]
+      : null;
+  const nextSuiteSlide =
+    loggedSuiteSlides.length > 1
+      ? loggedSuiteSlides[(activeSuiteSlideIndex + 1) % loggedSuiteSlides.length]
+      : null;
   const exploredHotelsWithSuites = useMemo(
     () => exploredHotels.filter((hotel) => hotel.roomEntries.some((entry) => entry.kind === 'SUITE')),
     [exploredHotels]
@@ -2285,14 +2311,10 @@ export function HyattTierListClient({
                   >
                     <div className="relative h-48 sm:h-52">
                       {slot.imageUrl ? (
-                        <Image
+                        <UserPhoto
                           src={slot.imageUrl}
                           alt={hotel.name}
-                          fill
-                          unoptimized
-                          loader={imageLoader}
-                          sizes="(max-width: 1024px) 100vw, 33vw"
-                          className="object-cover"
+                          className="absolute inset-0 h-full w-full object-cover"
                         />
                       ) : (
                         <div
@@ -2360,14 +2382,10 @@ export function HyattTierListClient({
                   >
                     <div className="relative h-48 sm:h-52">
                       {slot.imageUrl ? (
-                        <Image
+                        <UserPhoto
                           src={slot.imageUrl}
                           alt={`${hotel.name} ${slot.suiteName}`}
-                          fill
-                          unoptimized
-                          loader={imageLoader}
-                          sizes="(max-width: 1024px) 100vw, 33vw"
-                          className="object-cover"
+                          className="absolute inset-0 h-full w-full object-cover"
                         />
                       ) : (
                         <div
@@ -2849,9 +2867,9 @@ export function HyattTierListClient({
 
           {activeSuiteSlide ? (
             <div className="mt-5 space-y-4">
-              <article className="overflow-hidden rounded-[32px] border border-[rgba(0,102,179,0.12)] bg-[linear-gradient(145deg,rgba(255,255,255,0.96),rgba(229,239,247,0.88))] shadow-[0_24px_60px_rgba(18,57,102,0.14)]">
+              <article className="overflow-hidden rounded-[36px] border border-white/8 bg-[#0a121b] shadow-[0_28px_80px_rgba(8,25,43,0.38)]">
                 <div
-                  className="relative min-h-[420px] bg-[rgba(212,227,240,0.72)] sm:min-h-[580px]"
+                  className="relative min-h-[480px] bg-[#0a121b] sm:min-h-[720px]"
                   onPointerDown={(event) => {
                     suiteSwipeStartXRef.current = event.clientX;
                     suiteSwipeDeltaXRef.current = 0;
@@ -2887,60 +2905,114 @@ export function HyattTierListClient({
                   }}
                 >
                   {activeSuiteSlide.imageUrl ? (
-                    <Image
+                    <UserPhoto
                       src={activeSuiteSlide.imageUrl}
                       alt={`${activeSuiteSlide.hotel.name} ${activeSuiteSlide.suiteName}`}
-                      fill
-                      sizes="100vw"
-                      className="object-cover"
+                      eager
+                      className="absolute inset-0 h-full w-full object-cover scale-[1.08] blur-[10px] opacity-35"
                     />
                   ) : (
-                    <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(0,102,179,0.16),transparent_52%),linear-gradient(135deg,rgba(147,176,200,0.72),rgba(235,243,248,0.92))]" />
+                    <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(95,130,162,0.2),transparent_48%),linear-gradient(135deg,rgba(16,27,40,0.98),rgba(10,18,27,1))]" />
                   )}
 
-                  <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(9,31,52,0.03),rgba(9,31,52,0.22)_35%,rgba(9,31,52,0.78))]" />
-                  <div className="absolute inset-x-0 top-0 h-24 bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.42),transparent_68%)]" />
+                  <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(255,255,255,0.08),transparent_42%),linear-gradient(180deg,rgba(6,14,22,0.18),rgba(6,14,22,0.66)_52%,rgba(6,14,22,0.92))]" />
 
-                  <div className="absolute inset-x-4 top-4 flex items-start justify-between gap-3 sm:inset-x-5 sm:top-5">
-                    <div className="inline-flex rounded-full border border-white/22 bg-[rgba(8,31,52,0.42)] px-3 py-1.5 text-[0.62rem] font-semibold uppercase tracking-[0.16em] text-white backdrop-blur-sm">
-                      {activeSuiteSlide.hotel.brand}
-                    </div>
+                  <button
+                    type="button"
+                    onClick={showPreviousSuiteSlide}
+                    className="absolute left-3 top-1/2 z-20 inline-flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full border border-white/18 bg-[rgba(255,255,255,0.1)] text-lg font-semibold text-white backdrop-blur-md transition hover:bg-[rgba(255,255,255,0.18)] sm:left-6 sm:h-12 sm:w-12"
+                    aria-label="Show previous suite"
+                  >
+                    ←
+                  </button>
 
-                    <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={showNextSuiteSlide}
+                    className="absolute right-3 top-1/2 z-20 inline-flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full border border-white/18 bg-[rgba(255,255,255,0.1)] text-lg font-semibold text-white backdrop-blur-md transition hover:bg-[rgba(255,255,255,0.18)] sm:right-6 sm:h-12 sm:w-12"
+                    aria-label="Show next suite"
+                  >
+                    →
+                  </button>
+
+                  <div className="absolute inset-x-0 top-1/2 z-10 flex -translate-y-1/2 items-center justify-center gap-4 px-3 sm:gap-10 sm:px-8 lg:px-10">
+                    {previousSuiteSlide ? (
                       <button
                         type="button"
                         onClick={showPreviousSuiteSlide}
-                        className="inline-flex h-11 w-11 items-center justify-center rounded-full border border-white/24 bg-[rgba(255,255,255,0.14)] text-lg font-semibold text-white backdrop-blur-md transition hover:bg-[rgba(255,255,255,0.22)]"
-                        aria-label="Show previous suite"
+                        className="group relative hidden h-[300px] w-[190px] shrink-0 overflow-hidden rounded-[26px] border border-white/10 shadow-[0_22px_40px_rgba(0,0,0,0.28)] transition hover:-translate-x-1 hover:border-white/18 sm:block md:h-[430px] md:w-[280px] lg:h-[520px] lg:w-[320px] xl:-ml-14"
+                        aria-label={`Preview previous suite: ${previousSuiteSlide.suiteName}`}
                       >
-                        ←
+                        {previousSuiteSlide.imageUrl ? (
+                          <UserPhoto
+                            src={previousSuiteSlide.imageUrl}
+                            alt={`${previousSuiteSlide.hotel.name} ${previousSuiteSlide.suiteName}`}
+                            className="absolute inset-0 h-full w-full object-cover grayscale-[0.18] opacity-70 transition group-hover:opacity-82"
+                          />
+                        ) : (
+                          <div className="absolute inset-0 bg-[linear-gradient(135deg,rgba(126,138,149,0.45),rgba(43,54,67,0.9))]" />
+                        )}
+                        <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(7,18,28,0.16),rgba(7,18,28,0.82))]" />
                       </button>
+                    ) : null}
+
+                    <div className="relative h-[340px] w-[320px] shrink-0 overflow-hidden rounded-[30px] border border-white/14 shadow-[0_30px_70px_rgba(0,0,0,0.34)] sm:h-[440px] sm:w-[470px] md:h-[520px] md:w-[640px] lg:h-[560px] lg:w-[760px] xl:h-[600px] xl:w-[860px]">
+                      {activeSuiteSlide.imageUrl ? (
+                        <UserPhoto
+                          src={activeSuiteSlide.imageUrl}
+                          alt={`${activeSuiteSlide.hotel.name} ${activeSuiteSlide.suiteName}`}
+                          eager
+                          className="absolute inset-0 h-full w-full object-cover"
+                        />
+                      ) : (
+                        <div className="absolute inset-0 bg-[linear-gradient(135deg,rgba(147,176,200,0.78),rgba(41,56,71,0.98))]" />
+                      )}
+
+                      <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(10,10,10,0.03),rgba(10,10,10,0.16)_28%,rgba(10,10,10,0.72))]" />
+
+                      <div className="absolute left-3 top-3 sm:left-4 sm:top-4">
+                        <div className="inline-flex items-center rounded-full border border-white/20 bg-[rgba(255,255,255,0.12)] px-3 py-1.5 text-[0.84rem] font-semibold uppercase tracking-[0.14em] text-white shadow-[0_10px_24px_rgba(0,0,0,0.12)] backdrop-blur-md">
+                          {activeSuiteSlide.hotel.brand}
+                        </div>
+                      </div>
+
+                      <div className="absolute bottom-3 left-3 right-3 sm:bottom-4 sm:left-4 sm:right-4">
+                        <div className="w-[60%] max-w-[520px] min-w-[250px] rounded-[24px] border border-white/8 bg-[linear-gradient(145deg,rgba(24,24,24,0.1),rgba(24,24,24,0.22))] p-4 shadow-[0_18px_38px_rgba(0,0,0,0.1)] backdrop-blur-sm sm:max-w-[560px] sm:p-5">
+                          <div className="flex flex-wrap items-center gap-2.5">
+                            <div className="inline-flex items-center gap-2 rounded-full border border-white/20 bg-[rgba(255,255,255,0.14)] px-3 py-1.75 text-[0.92rem] font-semibold uppercase tracking-[0.12em] text-white shadow-[0_10px_24px_rgba(0,0,0,0.14)] backdrop-blur-md">
+                              <span aria-hidden="true">⭐</span>
+                              <span>{activeSuiteSlide.stars ? `${activeSuiteSlide.stars}/5 Stars` : 'Not Rated'}</span>
+                            </div>
+                          </div>
+                          <div className="mt-3 truncate text-xl font-semibold leading-tight text-white drop-shadow-[0_3px_10px_rgba(0,0,0,0.5)] sm:text-[2rem]">
+                            {activeSuiteSlide.suiteName}
+                          </div>
+                          <div className="mt-2 truncate text-sm font-medium uppercase tracking-[0.14em] text-white/90 drop-shadow-[0_3px_8px_rgba(0,0,0,0.45)] sm:text-[0.9rem]">
+                            {activeSuiteSlide.hotel.name}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    {nextSuiteSlide ? (
                       <button
                         type="button"
                         onClick={showNextSuiteSlide}
-                        className="inline-flex h-11 w-11 items-center justify-center rounded-full border border-white/24 bg-[rgba(255,255,255,0.14)] text-lg font-semibold text-white backdrop-blur-md transition hover:bg-[rgba(255,255,255,0.22)]"
-                        aria-label="Show next suite"
+                        className="group relative hidden h-[300px] w-[190px] shrink-0 overflow-hidden rounded-[26px] border border-white/10 shadow-[0_22px_40px_rgba(0,0,0,0.28)] transition hover:translate-x-1 hover:border-white/18 sm:block md:h-[430px] md:w-[280px] lg:h-[520px] lg:w-[320px] xl:-mr-14"
+                        aria-label={`Preview next suite: ${nextSuiteSlide.suiteName}`}
                       >
-                        →
+                        {nextSuiteSlide.imageUrl ? (
+                          <UserPhoto
+                            src={nextSuiteSlide.imageUrl}
+                            alt={`${nextSuiteSlide.hotel.name} ${nextSuiteSlide.suiteName}`}
+                            className="absolute inset-0 h-full w-full object-cover grayscale-[0.18] opacity-70 transition group-hover:opacity-82"
+                          />
+                        ) : (
+                          <div className="absolute inset-0 bg-[linear-gradient(135deg,rgba(126,138,149,0.45),rgba(43,54,67,0.9))]" />
+                        )}
+                        <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(7,18,28,0.16),rgba(7,18,28,0.82))]" />
                       </button>
-                    </div>
-                  </div>
-
-                  <div className="absolute bottom-4 left-4 right-4 sm:bottom-5 sm:left-5 sm:right-5">
-                    <div className="max-w-[520px] rounded-[26px] border border-white/10 bg-[linear-gradient(145deg,rgba(7,25,43,0.42),rgba(7,25,43,0.74))] p-4 backdrop-blur-md sm:max-w-[560px] sm:p-5">
-                      <div className="flex flex-wrap items-center gap-2.5">
-                        <div className="inline-flex items-center gap-1.5 rounded-full border border-white/28 bg-[rgba(255,255,255,0.2)] px-2.5 py-1.5 text-[0.82rem] font-semibold uppercase tracking-[0.12em] text-white shadow-[0_10px_24px_rgba(0,0,0,0.14)] backdrop-blur-md">
-                          <span aria-hidden="true">⭐</span>
-                          <span>{activeSuiteSlide.stars ? `${activeSuiteSlide.stars}/5 Stars` : 'Not Rated'}</span>
-                        </div>
-                      </div>
-                      <div className="mt-3 truncate text-xl font-semibold leading-tight text-white drop-shadow-[0_3px_10px_rgba(0,0,0,0.5)] sm:text-[2rem]">
-                        {activeSuiteSlide.suiteName}
-                      </div>
-                      <div className="mt-2 truncate text-sm font-medium text-white/90 drop-shadow-[0_3px_8px_rgba(0,0,0,0.45)] sm:text-base">
-                        {activeSuiteSlide.hotel.name}
-                      </div>
-                    </div>
+                    ) : null}
                   </div>
                 </div>
 
@@ -2997,14 +3069,10 @@ export function HyattTierListClient({
                   >
                     <div className="relative h-48 sm:h-52">
                       {slot.imageUrl ? (
-                        <Image
+                        <UserPhoto
                           src={slot.imageUrl}
                           alt={hotel.name}
-                          fill
-                          unoptimized
-                          loader={imageLoader}
-                          sizes="(max-width: 1024px) 100vw, 33vw"
-                          className="object-cover"
+                          className="absolute inset-0 h-full w-full object-cover"
                         />
                       ) : (
                         <div
@@ -3074,14 +3142,10 @@ export function HyattTierListClient({
                   >
                     <div className="relative h-52 sm:h-56">
                       {slot.imageUrl ? (
-                        <Image
+                        <UserPhoto
                           src={slot.imageUrl}
                           alt={hotel.name}
-                          fill
-                          unoptimized
-                          loader={imageLoader}
-                          sizes="(max-width: 1024px) 100vw, 33vw"
-                          className="object-cover"
+                          className="absolute inset-0 h-full w-full object-cover"
                         />
                       ) : (
                         <div
@@ -3151,14 +3215,10 @@ export function HyattTierListClient({
                   >
                     <div className="relative h-48 sm:h-52">
                       {slot.imageUrl ? (
-                        <Image
+                        <UserPhoto
                           src={slot.imageUrl}
                           alt={hotel.name}
-                          fill
-                          unoptimized
-                          loader={imageLoader}
-                          sizes="(max-width: 1024px) 100vw, 33vw"
-                          className="object-cover"
+                          className="absolute inset-0 h-full w-full object-cover"
                         />
                       ) : (
                         <div
@@ -3225,14 +3285,10 @@ export function HyattTierListClient({
                   >
                     <div className="relative h-48 sm:h-52">
                       {slot.imageUrl ? (
-                        <Image
+                        <UserPhoto
                           src={slot.imageUrl}
                           alt={hotel.name}
-                          fill
-                          unoptimized
-                          loader={imageLoader}
-                          sizes="(max-width: 1024px) 100vw, 33vw"
-                          className="object-cover"
+                          className="absolute inset-0 h-full w-full object-cover"
                         />
                       ) : (
                         <div
@@ -3339,14 +3395,10 @@ export function HyattTierListClient({
                           >
                             <div className="relative h-28">
                               {item.imageUrl ? (
-                                <Image
+                                <UserPhoto
                                   src={item.imageUrl}
                                   alt={item.hotel.name}
-                                  fill
-                                  unoptimized
-                                  loader={imageLoader}
-                                  sizes="(max-width: 640px) 100vw, (max-width: 1280px) 33vw, 18vw"
-                                  className="object-cover"
+                                  className="absolute inset-0 h-full w-full object-cover"
                                 />
                               ) : (
                                 <div
