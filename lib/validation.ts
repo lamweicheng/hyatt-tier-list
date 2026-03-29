@@ -13,7 +13,9 @@ const stayEntrySchema = z.object({
 
 const roomEntrySchema = z.object({
   label: z.string().trim().min(1, 'Room type is required').max(80, 'Max 80 characters'),
-  kind: z.enum(ROOM_ENTRY_KINDS)
+  kind: z.enum(ROOM_ENTRY_KINDS),
+  imageUrl: z.string().default(''),
+  stars: z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(4), z.literal(5), z.null()]).default(null)
 });
 
 export const hotelFormSchema = z
@@ -40,7 +42,9 @@ export const hotelFormSchema = z
     ...value,
     roomEntries: value.roomEntries.map((entry) => ({
       label: entry.label.trim(),
-      kind: entry.kind
+      kind: entry.kind,
+      imageUrl: entry.kind === 'SUITE' ? entry.imageUrl.trim() : '',
+      stars: entry.kind === 'SUITE' ? entry.stars : null
     })),
     stayEntries:
       value.stayType === 'EXPLORED'
@@ -114,6 +118,7 @@ const dashboardSectionIdSchema = z.union([
   z.literal('tierBoard'),
   z.literal('futureHotels'),
   z.literal('travelTimeline'),
+  z.literal('suiteSlideshow'),
   z.literal('topFutureStays'),
   z.literal('topExperiences'),
   z.literal('topUnderrated'),
@@ -126,11 +131,12 @@ const displayPreferencesSchema = z.object({
   showTierBoard: z.boolean(),
   showFutureHotels: z.boolean(),
   showTravelTimeline: z.boolean(),
+  showSuiteSlideshow: z.boolean(),
   showTopFutureStays: z.boolean(),
   showTopExperiences: z.boolean(),
   showTopUnderrated: z.boolean(),
   showTopReturnStays: z.boolean(),
-  sectionOrder: z.array(dashboardSectionIdSchema).length(9)
+  sectionOrder: z.array(dashboardSectionIdSchema).length(10)
 });
 
 export const dashboardPreferencesSchema = z.object({

@@ -47,7 +47,9 @@ const DEFAULT_DRAFT: HotelDraft = {
 
 const EMPTY_ROOM_ENTRY: RoomEntry = {
   label: '',
-  kind: 'SUITE'
+  kind: 'SUITE',
+  imageUrl: '',
+  stars: null
 };
 
 const MONTH_LABELS = [
@@ -167,6 +169,14 @@ type TopOverviewSection = {
   items: TopOverviewItem[];
 };
 
+type LoggedSuiteEntry = {
+  id: string;
+  suiteName: string;
+  imageUrl: string;
+  stars: 1 | 2 | 3 | 4 | 5 | null;
+  hotel: HotelRecord;
+};
+
 const DEFAULT_TOP_PICKS: TopPickSlot[] = [
   { rank: 1, hotelId: '', imageUrl: '' },
   { rank: 2, hotelId: '', imageUrl: '' },
@@ -209,6 +219,7 @@ const DEFAULT_SECTION_ORDER: DashboardSectionId[] = [
   'tierBoard',
   'futureHotels',
   'travelTimeline',
+  'suiteSlideshow',
   'topFutureStays',
   'topExperiences',
   'topUnderrated',
@@ -221,6 +232,7 @@ const DEFAULT_DISPLAY_PREFERENCES: DisplayPreferences = {
   showTierBoard: true,
   showFutureHotels: true,
   showTravelTimeline: true,
+  showSuiteSlideshow: true,
   showTopFutureStays: true,
   showTopExperiences: true,
   showTopUnderrated: true,
@@ -243,7 +255,12 @@ function normalizeRoomEntries(value: unknown): RoomEntry[] {
     .filter((entry): entry is Record<string, unknown> => typeof entry === 'object' && entry !== null)
     .map<RoomEntry>((entry) => ({
       label: typeof entry.label === 'string' ? entry.label : '',
-      kind: entry.kind === 'SUITE' ? 'SUITE' : 'ROOM'
+      kind: entry.kind === 'SUITE' ? 'SUITE' : 'ROOM',
+      imageUrl: typeof entry.imageUrl === 'string' ? entry.imageUrl : '',
+      stars:
+        entry.stars === 1 || entry.stars === 2 || entry.stars === 3 || entry.stars === 4 || entry.stars === 5
+          ? entry.stars
+          : null
     }))
     .filter((entry) => entry.label.trim().length > 0);
 }
@@ -668,6 +685,10 @@ function normalizeDisplayPreferences(value: unknown): DisplayPreferences {
       typeof record.showTravelTimeline === 'boolean'
         ? record.showTravelTimeline
         : DEFAULT_DISPLAY_PREFERENCES.showTravelTimeline,
+    showSuiteSlideshow:
+      typeof record.showSuiteSlideshow === 'boolean'
+        ? record.showSuiteSlideshow
+        : DEFAULT_DISPLAY_PREFERENCES.showSuiteSlideshow,
     showTopFutureStays:
       typeof record.showTopFutureStays === 'boolean'
         ? record.showTopFutureStays
@@ -761,6 +782,9 @@ export function HyattTierListClient({
   const [recentlyDraggedHotelId, setRecentlyDraggedHotelId] = useState<string | null>(null);
   const [isCompactMode, setIsCompactMode] = useState(false);
   const [isTravelTimelineCompactMode, setIsTravelTimelineCompactMode] = useState(false);
+  const [activeSuiteSlideIndex, setActiveSuiteSlideIndex] = useState(0);
+  const suiteSwipeStartXRef = useRef<number | null>(null);
+  const suiteSwipeDeltaXRef = useRef(0);
   const [isAllBrandsOpen, setIsAllBrandsOpen] = useState(false);
   const [isExploredBrandsOpen, setIsExploredBrandsOpen] = useState(false);
   const [isFutureBrandsOpen, setIsFutureBrandsOpen] = useState(false);
@@ -1010,10 +1034,89 @@ export function HyattTierListClient({
       exploredHotels.flatMap((hotel) =>
         hotel.roomEntries
           .filter((entry) => entry.kind === 'SUITE')
-          .map((entry) => ({ hotelName: hotel.name, brand: hotel.brand, suiteName: entry.label, tier: hotel.tier }))
+          .map((entry, index) => ({
+            hotelName: hotel.name,
+            brand: hotel.brand,
+            suiteName: entry.label,
+            tier: hotel.tier,
+            imageUrl: entry.imageUrl,
+            stars: entry.stars,
+            key: `${hotel.id}-${entry.label}-${index}`
+          }))
       ),
     [exploredHotels]
   );
+  const loggedSuiteSlides = useMemo<LoggedSuiteEntry[]>(
+    () =>
+      exploredHotels.flatMap((hotel) =>
+        hotel.roomEntries
+          .filter((entry) => entry.kind === 'SUITE')
+          .map((entry, index) => ({
+            id: `${hotel.id}-${entry.label}-${index}`,
+            suiteName: entry.label,
+            imageUrl: entry.imageUrl,
+            stars: entry.stars,
+            hotel
+          }))
+      ),
+    [exploredHotels]
+  );
+  useEffect(() => {
+    setActiveSuiteSlideIndex((current) => {
+      if (loggedSuiteSlides.length === 0) {
+        return 0;
+      }
+
+      return Math.min(current, loggedSuiteSlides.length - 1);
+    });
+  }, [loggedSuiteSlides.length]);
+
+  function showPreviousSuiteSlide() {
+    setActiveSuiteSlideIndex((current) =>
+      loggedSuiteSlides.length ? (current - 1 + loggedSuiteSlides.length) % loggedSuiteSlides.length : 0
+    );
+  }
+
+  function showNextSuiteSlide() {
+    setActiveSuiteSlideIndex((current) => (loggedSuiteSlides.length ? (current + 1) % loggedSuiteSlides.length : 0));
+  }
+
+  useEffect(() => {
+    if (!displayPreferences.showSuiteSlideshow || loggedSuiteSlides.length <= 1) {
+      return;
+    }
+
+    const slideCount = loggedSuiteSlides.length;
+
+    function handleSuiteSlideshowKeydown(event: KeyboardEvent) {
+      const target = event.target;
+
+      if (
+        target instanceof HTMLElement &&
+        (target.tagName === 'INPUT' ||
+          target.tagName === 'TEXTAREA' ||
+          target.tagName === 'SELECT' ||
+          target.isContentEditable)
+      ) {
+        return;
+      }
+
+      if (event.key === 'ArrowLeft') {
+        event.preventDefault();
+        setActiveSuiteSlideIndex((current) => ((current - 1 + slideCount) % slideCount));
+      }
+
+      if (event.key === 'ArrowRight') {
+        event.preventDefault();
+        setActiveSuiteSlideIndex((current) => ((current + 1) % slideCount));
+      }
+    }
+
+    window.addEventListener('keydown', handleSuiteSlideshowKeydown);
+    return () => window.removeEventListener('keydown', handleSuiteSlideshowKeydown);
+  }, [displayPreferences.showSuiteSlideshow, loggedSuiteSlides.length]);
+
+  const activeSuiteSlide = loggedSuiteSlides[activeSuiteSlideIndex] ?? null;
   const exploredHotelsWithSuites = useMemo(
     () => exploredHotels.filter((hotel) => hotel.roomEntries.some((entry) => entry.kind === 'SUITE')),
     [exploredHotels]
@@ -1326,6 +1429,17 @@ export function HyattTierListClient({
         void updateDisplayPreferences({
           ...displayPreferences,
           showTravelTimeline: !displayPreferences.showTravelTimeline
+        })
+    },
+    {
+      id: 'suiteSlideshow' as const,
+      label: 'Suite Slideshow',
+      description: 'Show or hide your logged suites carousel.',
+      shown: displayPreferences.showSuiteSlideshow,
+      toggle: () =>
+        void updateDisplayPreferences({
+          ...displayPreferences,
+          showSuiteSlideshow: !displayPreferences.showSuiteSlideshow
         })
     },
     {
@@ -1916,7 +2030,9 @@ export function HyattTierListClient({
     const cleanedRoomEntries = draft.roomEntries
       .map((entry) => ({
         label: entry.label.trim(),
-        kind: entry.kind
+        kind: entry.kind,
+        imageUrl: entry.kind === 'SUITE' ? entry.imageUrl.trim() : '',
+        stars: entry.kind === 'SUITE' ? entry.stars : null
       }))
       .filter((entry) => entry.label);
 
@@ -2712,6 +2828,135 @@ export function HyattTierListClient({
           ) : (
             <div className="mt-5 rounded-[22px] border border-dashed border-[rgba(0,102,179,0.16)] bg-white/58 p-5 text-sm text-[rgba(34,58,86,0.62)]">
               Add month and year entries to explored hotels to build your travel timeline.
+            </div>
+          )}
+        </section>
+        ) : null}
+
+        {displayPreferences.showSuiteSlideshow ? (
+        <section className="glass-panel rounded-[28px] px-4 py-4 sm:px-5 sm:py-5" style={{ order: getSectionOrder('suiteSlideshow') }}>
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <p className="section-label">Suites I Explored</p>
+            </div>
+
+            {loggedSuiteSlides.length ? (
+              <div className="rounded-full border border-white/80 bg-white/75 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-[rgba(34,58,86,0.58)]">
+                {activeSuiteSlideIndex + 1} / {loggedSuiteSlides.length}
+              </div>
+            ) : null}
+          </div>
+
+          {activeSuiteSlide ? (
+            <div className="mt-5 space-y-4">
+              <article className="overflow-hidden rounded-[32px] border border-[rgba(0,102,179,0.12)] bg-[linear-gradient(145deg,rgba(255,255,255,0.96),rgba(229,239,247,0.88))] shadow-[0_24px_60px_rgba(18,57,102,0.14)]">
+                <div
+                  className="relative min-h-[420px] bg-[rgba(212,227,240,0.72)] sm:min-h-[580px]"
+                  onPointerDown={(event) => {
+                    suiteSwipeStartXRef.current = event.clientX;
+                    suiteSwipeDeltaXRef.current = 0;
+                  }}
+                  onPointerMove={(event) => {
+                    if (suiteSwipeStartXRef.current === null) {
+                      return;
+                    }
+
+                    suiteSwipeDeltaXRef.current = event.clientX - suiteSwipeStartXRef.current;
+                  }}
+                  onPointerUp={() => {
+                    if (suiteSwipeStartXRef.current === null) {
+                      return;
+                    }
+
+                    if (suiteSwipeDeltaXRef.current <= -50) {
+                      showNextSuiteSlide();
+                    } else if (suiteSwipeDeltaXRef.current >= 50) {
+                      showPreviousSuiteSlide();
+                    }
+
+                    suiteSwipeStartXRef.current = null;
+                    suiteSwipeDeltaXRef.current = 0;
+                  }}
+                  onPointerCancel={() => {
+                    suiteSwipeStartXRef.current = null;
+                    suiteSwipeDeltaXRef.current = 0;
+                  }}
+                  onPointerLeave={() => {
+                    suiteSwipeStartXRef.current = null;
+                    suiteSwipeDeltaXRef.current = 0;
+                  }}
+                >
+                  {activeSuiteSlide.imageUrl ? (
+                    <Image
+                      src={activeSuiteSlide.imageUrl}
+                      alt={`${activeSuiteSlide.hotel.name} ${activeSuiteSlide.suiteName}`}
+                      fill
+                      sizes="100vw"
+                      className="object-cover"
+                    />
+                  ) : (
+                    <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(0,102,179,0.16),transparent_52%),linear-gradient(135deg,rgba(147,176,200,0.72),rgba(235,243,248,0.92))]" />
+                  )}
+
+                  <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(9,31,52,0.03),rgba(9,31,52,0.22)_35%,rgba(9,31,52,0.78))]" />
+                  <div className="absolute inset-x-0 top-0 h-24 bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.42),transparent_68%)]" />
+
+                  <div className="absolute inset-x-4 top-4 flex items-start justify-between gap-3 sm:inset-x-5 sm:top-5">
+                    <div className="inline-flex rounded-full border border-white/22 bg-[rgba(8,31,52,0.42)] px-3 py-1.5 text-[0.62rem] font-semibold uppercase tracking-[0.16em] text-white backdrop-blur-sm">
+                      {activeSuiteSlide.hotel.brand}
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={showPreviousSuiteSlide}
+                        className="inline-flex h-11 w-11 items-center justify-center rounded-full border border-white/24 bg-[rgba(255,255,255,0.14)] text-lg font-semibold text-white backdrop-blur-md transition hover:bg-[rgba(255,255,255,0.22)]"
+                        aria-label="Show previous suite"
+                      >
+                        ←
+                      </button>
+                      <button
+                        type="button"
+                        onClick={showNextSuiteSlide}
+                        className="inline-flex h-11 w-11 items-center justify-center rounded-full border border-white/24 bg-[rgba(255,255,255,0.14)] text-lg font-semibold text-white backdrop-blur-md transition hover:bg-[rgba(255,255,255,0.22)]"
+                        aria-label="Show next suite"
+                      >
+                        →
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="absolute bottom-4 left-4 right-4 sm:bottom-5 sm:left-5 sm:right-5">
+                    <div className="max-w-[520px] rounded-[26px] border border-white/10 bg-[linear-gradient(145deg,rgba(7,25,43,0.42),rgba(7,25,43,0.74))] p-4 backdrop-blur-md sm:max-w-[560px] sm:p-5">
+                      <div className="flex flex-wrap items-center gap-2.5">
+                        <div className="inline-flex items-center gap-1.5 rounded-full border border-white/28 bg-[rgba(255,255,255,0.2)] px-2.5 py-1.5 text-[0.82rem] font-semibold uppercase tracking-[0.12em] text-white shadow-[0_10px_24px_rgba(0,0,0,0.14)] backdrop-blur-md">
+                          <span aria-hidden="true">⭐</span>
+                          <span>{activeSuiteSlide.stars ? `${activeSuiteSlide.stars}/5 Stars` : 'Not Rated'}</span>
+                        </div>
+                      </div>
+                      <div className="mt-3 truncate text-xl font-semibold leading-tight text-white drop-shadow-[0_3px_10px_rgba(0,0,0,0.5)] sm:text-[2rem]">
+                        {activeSuiteSlide.suiteName}
+                      </div>
+                      <div className="mt-2 truncate text-sm font-medium text-white/90 drop-shadow-[0_3px_8px_rgba(0,0,0,0.45)] sm:text-base">
+                        {activeSuiteSlide.hotel.name}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="space-y-4 p-4 sm:p-5">
+                  <div className="h-1.5 overflow-hidden rounded-full bg-[rgba(0,102,179,0.08)]">
+                    <div
+                      className="h-full rounded-full bg-[linear-gradient(90deg,#7a1f2c,#c38a52)] transition-[width] duration-300"
+                      style={{ width: `${((activeSuiteSlideIndex + 1) / loggedSuiteSlides.length) * 100}%` }}
+                    />
+                  </div>
+                </div>
+              </article>
+            </div>
+          ) : (
+            <div className="mt-5 rounded-[22px] border border-dashed border-[rgba(0,102,179,0.16)] bg-white/58 p-5 text-sm text-[rgba(34,58,86,0.62)]">
+              Add suite entries with an image URL to explored hotels and they will appear here.
             </div>
           )}
         </section>
@@ -4231,6 +4476,42 @@ export function HyattTierListClient({
                           >
                             Remove
                           </button>
+
+                          {entry.kind === 'SUITE' ? (
+                            <>
+                              <input
+                                value={entry.imageUrl}
+                                onChange={(event) =>
+                                  updateRoomEntry(index, (current) => ({
+                                    ...current,
+                                    imageUrl: event.target.value
+                                  }))
+                                }
+                                placeholder="https://example.com/suite-photo.jpg"
+                                className="w-full rounded-[16px] border border-[rgba(118,31,47,0.14)] bg-white/92 px-4 py-3 text-sm text-[rgb(var(--page-foreground))] outline-none transition focus:border-[rgba(118,31,47,0.32)] focus:ring-4 focus:ring-[rgba(118,31,47,0.08)] md:col-span-2"
+                              />
+
+                              <div className="md:col-span-2 md:max-w-[12rem]">
+                                <FancySelect
+                                  value={entry.stars ? String(entry.stars) : 'unrated'}
+                                  onChange={(value) =>
+                                    updateRoomEntry(index, (current) => ({
+                                      ...current,
+                                      stars: value === 'unrated' ? null : (Number(value) as 1 | 2 | 3 | 4 | 5)
+                                    }))
+                                  }
+                                  options={[
+                                    { value: 'unrated', label: 'No rating yet' },
+                                    { value: '1', label: '1 star' },
+                                    { value: '2', label: '2 stars' },
+                                    { value: '3', label: '3 stars' },
+                                    { value: '4', label: '4 stars' },
+                                    { value: '5', label: '5 stars' }
+                                  ]}
+                                />
+                              </div>
+                            </>
+                          ) : null}
                         </div>
                       ))}
                     </div>

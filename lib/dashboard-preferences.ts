@@ -60,6 +60,7 @@ export const DEFAULT_SECTION_ORDER: DashboardSectionId[] = [
   'tierBoard',
   'futureHotels',
   'travelTimeline',
+  'suiteSlideshow',
   'topFutureStays',
   'topExperiences',
   'topUnderrated',
@@ -72,6 +73,7 @@ export const DEFAULT_DISPLAY_PREFERENCES: DisplayPreferences = {
   showTierBoard: true,
   showFutureHotels: true,
   showTravelTimeline: true,
+  showSuiteSlideshow: true,
   showTopFutureStays: true,
   showTopExperiences: true,
   showTopUnderrated: true,
@@ -319,6 +321,10 @@ function fallbackDisplayPreferences(value: unknown): DisplayPreferences {
       typeof record.showTravelTimeline === 'boolean'
         ? record.showTravelTimeline
         : DEFAULT_DISPLAY_PREFERENCES.showTravelTimeline,
+    showSuiteSlideshow:
+      typeof record.showSuiteSlideshow === 'boolean'
+        ? record.showSuiteSlideshow
+        : DEFAULT_DISPLAY_PREFERENCES.showSuiteSlideshow,
     showTopFutureStays:
       typeof record.showTopFutureStays === 'boolean'
         ? record.showTopFutureStays

@@ -34,7 +34,18 @@ function toHotelRecord(hotel: {
         })
         .map((entry) => ({
           label: entry.label,
-          kind: entry.kind
+          kind: entry.kind,
+          imageUrl: typeof (entry as unknown as Record<string, unknown>).imageUrl === 'string'
+            ? ((entry as unknown as Record<string, unknown>).imageUrl as string)
+            : '',
+          stars:
+            (entry as unknown as Record<string, unknown>).stars === 1 ||
+            (entry as unknown as Record<string, unknown>).stars === 2 ||
+            (entry as unknown as Record<string, unknown>).stars === 3 ||
+            (entry as unknown as Record<string, unknown>).stars === 4 ||
+            (entry as unknown as Record<string, unknown>).stars === 5
+              ? ((entry as unknown as Record<string, unknown>).stars as 1 | 2 | 3 | 4 | 5)
+              : null
         }))
     : [];
 

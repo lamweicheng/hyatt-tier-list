@@ -7,6 +7,8 @@ export type RoomEntryKind = 'ROOM' | 'SUITE';
 export type RoomEntry = {
   label: string;
   kind: RoomEntryKind;
+  imageUrl: string;
+  stars: 1 | 2 | 3 | 4 | 5 | null;
 };
 
 export type StayEntry = {
@@ -86,6 +88,7 @@ export type DashboardSectionId =
   | 'tierBoard'
   | 'futureHotels'
   | 'travelTimeline'
+  | 'suiteSlideshow'
   | 'topFutureStays'
   | 'topExperiences'
   | 'topUnderrated'
@@ -97,6 +100,7 @@ export type DisplayPreferences = {
   showTierBoard: boolean;
   showFutureHotels: boolean;
   showTravelTimeline: boolean;
+  showSuiteSlideshow: boolean;
   showTopFutureStays: boolean;
   showTopExperiences: boolean;
   showTopUnderrated: boolean;
