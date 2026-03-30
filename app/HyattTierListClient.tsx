@@ -2855,7 +2855,7 @@ export function HyattTierListClient({
         <section className="glass-panel rounded-[28px] px-4 py-4 sm:px-5 sm:py-5" style={{ order: getSectionOrder('suiteSlideshow') }}>
           <div className="flex items-center justify-between gap-3">
             <div>
-              <p className="section-label">Suites I Explored</p>
+              <p className="section-label">My Suite Explorations</p>
             </div>
 
             {loggedSuiteSlides.length ? (
