@@ -803,10 +803,10 @@ export function HyattTierListClient({
   const [activeSuiteSlideIndex, setActiveSuiteSlideIndex] = useState(0);
   const suiteSwipeStartXRef = useRef<number | null>(null);
   const suiteSwipeDeltaXRef = useRef(0);
+  const suiteExplorationsSectionRef = useRef<HTMLElement | null>(null);
   const [isAllBrandsOpen, setIsAllBrandsOpen] = useState(false);
   const [isExploredBrandsOpen, setIsExploredBrandsOpen] = useState(false);
   const [isFutureBrandsOpen, setIsFutureBrandsOpen] = useState(false);
-  const [isSuitesOpen, setIsSuitesOpen] = useState(false);
   const [isTopOverviewOpen, setIsTopOverviewOpen] = useState(false);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [isTopPicksOpen, setIsTopPicksOpen] = useState(false);
@@ -1046,23 +1046,6 @@ export function HyattTierListClient({
   const futureExploringBrands = useMemo(
     () => HYATT_BRANDS.filter((brand) => futureHotels.some((hotel) => hotel.brand === brand.name) && !exploredBrandNames.has(brand.name)),
     [exploredBrandNames, futureHotels]
-  );
-  const exploredSuites = useMemo(
-    () =>
-      exploredHotels.flatMap((hotel) =>
-        hotel.roomEntries
-          .filter((entry) => entry.kind === 'SUITE')
-          .map((entry, index) => ({
-            hotelName: hotel.name,
-            brand: hotel.brand,
-            suiteName: entry.label,
-            tier: hotel.tier,
-            imageUrl: entry.imageUrl,
-            stars: entry.stars,
-            key: `${hotel.id}-${entry.label}-${index}`
-          }))
-      ),
-    [exploredHotels]
   );
   const loggedSuiteSlides = useMemo<LoggedSuiteEntry[]>(
     () =>
@@ -1592,6 +1575,10 @@ export function HyattTierListClient({
     setTopPicksDraft(topPicks);
     setTopPicksError(null);
     setIsTopPicksOpen(true);
+  }
+
+  function scrollToSuiteExplorations() {
+    suiteExplorationsSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
 
   async function persistDashboardPreferences(nextPreferences: DashboardPreferencesPatch) {
@@ -2242,15 +2229,15 @@ export function HyattTierListClient({
                         <button
                           type="button"
                           onClick={() => setIsExploredBrandsOpen(true)}
-                          className="text-[0.62rem] uppercase tracking-[0.14em] text-[rgba(34,58,86,0.52)] transition hover:text-[rgb(var(--wine))] sm:text-[0.72rem] sm:tracking-[0.16em]"
+                          className="block w-full text-left align-top text-[0.62rem] uppercase tracking-[0.14em] text-[rgba(34,58,86,0.52)] transition hover:text-[rgb(var(--wine))] sm:text-[0.72rem] sm:tracking-[0.16em]"
                         >
                           {card.label}
                         </button>
                       ) : card.label === 'Suites Explored' ? (
                         <button
                           type="button"
-                          onClick={() => setIsSuitesOpen(true)}
-                          className="text-[0.62rem] uppercase tracking-[0.14em] text-[rgba(34,58,86,0.52)] transition hover:text-[rgb(var(--wine))] sm:text-[0.72rem] sm:tracking-[0.16em]"
+                          onClick={scrollToSuiteExplorations}
+                          className="block w-full text-left align-top text-[0.62rem] uppercase tracking-[0.14em] text-[rgba(34,58,86,0.52)] transition hover:text-[rgb(var(--wine))] sm:text-[0.72rem] sm:tracking-[0.16em]"
                         >
                           {card.label}
                         </button>
@@ -2258,7 +2245,7 @@ export function HyattTierListClient({
                         <button
                           type="button"
                           onClick={() => setIsFutureBrandsOpen(true)}
-                          className="text-[0.62rem] uppercase tracking-[0.14em] text-[rgba(34,58,86,0.52)] transition hover:text-[rgb(var(--wine))] sm:text-[0.72rem] sm:tracking-[0.16em]"
+                          className="block w-full whitespace-nowrap text-left align-top text-[0.54rem] uppercase tracking-[0.08em] text-[rgba(34,58,86,0.52)] transition hover:text-[rgb(var(--wine))] sm:text-[0.62rem] sm:tracking-[0.1em] lg:text-[0.68rem]"
                         >
                           {card.label}
                         </button>
@@ -2852,7 +2839,11 @@ export function HyattTierListClient({
         ) : null}
 
         {displayPreferences.showSuiteSlideshow ? (
-        <section className="glass-panel rounded-[28px] px-4 py-4 sm:px-5 sm:py-5" style={{ order: getSectionOrder('suiteSlideshow') }}>
+        <section
+          ref={suiteExplorationsSectionRef}
+          className="glass-panel rounded-[28px] px-4 py-4 sm:px-5 sm:py-5"
+          style={{ order: getSectionOrder('suiteSlideshow') }}
+        >
           <div className="flex items-center justify-between gap-3">
             <div>
               <p className="section-label">My Suite Explorations</p>
@@ -3678,54 +3669,6 @@ export function HyattTierListClient({
                     </div>
                     <div className="mt-2 text-xl font-semibold text-[rgb(var(--page-foreground))]">
                       {brand.name}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        </div>
-      ) : null}
-
-      {isSuitesOpen ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-[rgba(42,18,22,0.48)] px-4 py-8 backdrop-blur-sm">
-          <div className="glass-panel w-full max-w-3xl rounded-[30px] p-5 sm:p-7">
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <p className="section-label">Suites Explored</p>
-                <h2 className="mt-2 text-2xl font-semibold leading-none text-[rgb(var(--page-foreground))] font-[family:var(--font-display)] sm:text-4xl">
-                  Every Suite I Explored
-                </h2>
-              </div>
-              <button
-                type="button"
-                onClick={() => setIsSuitesOpen(false)}
-                className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-[rgba(118,31,47,0.16)] bg-white/80 text-lg text-[rgb(var(--wine))] transition hover:bg-[rgba(118,31,47,0.06)]"
-                aria-label="Close suites explored"
-              >
-                ×
-              </button>
-            </div>
-
-            <div className="mt-6 max-h-[70vh] space-y-3 overflow-auto pr-1">
-              {exploredSuites.map((suite) => {
-                const brand = BRAND_BY_NAME[suite.brand];
-                const style = getBrandVisualStyle(suite.brand, brand?.color ?? '#1D4ED8');
-
-                return (
-                  <div
-                    key={`${suite.hotelName}-${suite.suiteName}`}
-                    className="rounded-[22px] border p-4"
-                    style={{ borderColor: style.borderColor, background: style.background }}
-                  >
-                    <div className="text-sm font-semibold uppercase tracking-[0.14em]" style={{ color: style.labelColor }}>
-                      {suite.hotelName}
-                    </div>
-                    <div className="mt-2 text-xl font-semibold text-[rgb(var(--page-foreground))]">
-                      {suite.suiteName}
-                    </div>
-                    <div className="mt-2 text-sm text-[rgba(34,58,86,0.62)]">
-                      {suite.brand} {suite.tier ? `• ${suite.tier}-Tier` : ''}
                     </div>
                   </div>
                 );
