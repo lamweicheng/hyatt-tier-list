@@ -37,6 +37,14 @@ export const hotelFormSchema = z
         message: 'Select a tier'
       });
     }
+
+    if (value.stayType === 'FUTURE' && value.stayEntries.length === 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['stayEntries'],
+        message: 'Add at least one planned month and year'
+      });
+    }
   })
   .transform((value) => ({
     ...value,
@@ -46,14 +54,11 @@ export const hotelFormSchema = z
       imageUrl: entry.kind === 'SUITE' ? entry.imageUrl.trim() : '',
       stars: entry.kind === 'SUITE' ? entry.stars : null
     })),
-    stayEntries:
-      value.stayType === 'EXPLORED'
-        ? value.stayEntries.map((entry) => ({
-            id: entry.id?.trim() || crypto.randomUUID(),
-            month: entry.month,
-            year: entry.year
-          }))
-        : []
+    stayEntries: value.stayEntries.map((entry) => ({
+      id: entry.id?.trim() || crypto.randomUUID(),
+      month: entry.month,
+      year: entry.year
+    }))
   }));
 
 export type HotelFormPayload = z.infer<typeof hotelFormSchema>;

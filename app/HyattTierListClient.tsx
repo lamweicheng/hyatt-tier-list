@@ -87,6 +87,8 @@ const MONTH_OPTIONS = MONTH_LABELS.map((label, index) => ({
   label
 }));
 
+const CURRENT_MONTH_INDEX = new Date().getFullYear() * 12 + new Date().getMonth();
+
 const TIER_STYLES: Record<
   Tier,
   {
@@ -308,6 +310,54 @@ function normalizeStayEntries(value: unknown): StayEntry[] {
     .sort((left, right) => right.year - left.year || right.month - left.month);
 }
 
+function compareStayEntriesAscending(left: StayEntry, right: StayEntry) {
+  return left.year - right.year || left.month - right.month;
+}
+
+function getMonthIndex(entry: StayEntry) {
+  return entry.year * 12 + (entry.month - 1);
+}
+
+function getPrimaryFutureStayEntry(hotel: HotelRecord) {
+  const sortedEntries = [...hotel.stayEntries].sort(compareStayEntriesAscending);
+  return sortedEntries.find((entry) => getMonthIndex(entry) >= CURRENT_MONTH_INDEX) ?? sortedEntries[0] ?? null;
+}
+
+function sortFutureHotelsByPlannedDate(hotels: HotelRecord[]) {
+  return [...hotels].sort((left, right) => {
+    const leftEntry = getPrimaryFutureStayEntry(left);
+    const rightEntry = getPrimaryFutureStayEntry(right);
+
+    if (leftEntry && rightEntry) {
+      const byPlannedDate = compareStayEntriesAscending(leftEntry, rightEntry);
+
+      if (byPlannedDate !== 0) {
+        return byPlannedDate;
+      }
+    } else if (leftEntry) {
+      return -1;
+    } else if (rightEntry) {
+      return 1;
+    }
+
+    const byName = left.name.localeCompare(right.name);
+
+    if (byName !== 0) {
+      return byName;
+    }
+
+    return left.brand.localeCompare(right.brand);
+  });
+}
+
+function formatMonthYear(entry: StayEntry | null) {
+  if (!entry) {
+    return 'Date TBD';
+  }
+
+  return `${MONTH_LABELS[entry.month - 1]} ${entry.year}`;
+}
+
 function normalizeHotelRecord(value: unknown): HotelRecord {
   const raw = (typeof value === 'object' && value !== null ? value : {}) as Record<string, unknown>;
   const stayType: StayType = raw.stayType === 'FUTURE' ? 'FUTURE' : 'EXPLORED';
@@ -324,7 +374,7 @@ function normalizeHotelRecord(value: unknown): HotelRecord {
     stayType,
     tier,
     roomEntries: normalizeRoomEntries(raw.roomEntries),
-    stayEntries: stayType === 'EXPLORED' ? normalizeStayEntries(raw.stayEntries) : [],
+    stayEntries: normalizeStayEntries(raw.stayEntries),
     position: typeof raw.position === 'number' && Number.isInteger(raw.position) ? raw.position : 0,
     createdAt: typeof raw.createdAt === 'string' ? raw.createdAt : timestamp,
     updatedAt: typeof raw.updatedAt === 'string' ? raw.updatedAt : timestamp
@@ -1014,7 +1064,7 @@ export function HyattTierListClient({
     [hotels]
   );
   const futureHotels = useMemo(
-    () => sortHotelsByTier(hotels.filter((hotel) => hotel.stayType === 'FUTURE')),
+    () => sortFutureHotelsByPlannedDate(hotels.filter((hotel) => hotel.stayType === 'FUTURE')),
     [hotels]
   );
 
@@ -1130,10 +1180,17 @@ export function HyattTierListClient({
     () => exploredHotels.filter((hotel) => hotel.roomEntries.some((entry) => entry.kind === 'SUITE')),
     [exploredHotels]
   );
-  const selectedBrandHotels = useMemo(
-    () => (selectedBrandName ? sortHotelsByTier(hotels.filter((hotel) => hotel.brand === selectedBrandName)) : []),
-    [hotels, selectedBrandName]
-  );
+  const selectedBrandHotels = useMemo(() => {
+    if (!selectedBrandName) {
+      return [];
+    }
+
+    const brandHotels = hotels.filter((hotel) => hotel.brand === selectedBrandName);
+    return [
+      ...sortHotelsByTier(brandHotels.filter((hotel) => hotel.stayType === 'EXPLORED')),
+      ...sortFutureHotelsByPlannedDate(brandHotels.filter((hotel) => hotel.stayType === 'FUTURE'))
+    ];
+  }, [hotels, selectedBrandName]);
   const topPicksResolved = useMemo(
     () =>
       topPicks
@@ -2055,23 +2112,20 @@ export function HyattTierListClient({
       stayType: draft.stayType,
       tier: draft.stayType === 'EXPLORED' ? draft.tier ?? 'S' : null,
       roomEntries: cleanedRoomEntries,
-      stayEntries:
-        draft.stayType === 'EXPLORED'
-          ? draft.stayEntries
-              .map((entry) => ({
-                id: entry.id || crypto.randomUUID(),
-                month: Number(entry.month),
-                year: Number(entry.year)
-              }))
-              .filter(
-                (entry) =>
-                  Number.isInteger(entry.month) &&
-                  entry.month >= 1 &&
-                  entry.month <= 12 &&
-                  Number.isInteger(entry.year) &&
-                  entry.year >= 1900
-              )
-          : []
+      stayEntries: draft.stayEntries
+        .map((entry) => ({
+          id: entry.id || crypto.randomUUID(),
+          month: Number(entry.month),
+          year: Number(entry.year)
+        }))
+        .filter(
+          (entry) =>
+            Number.isInteger(entry.month) &&
+            entry.month >= 1 &&
+            entry.month <= 12 &&
+            Number.isInteger(entry.year) &&
+            entry.year >= 1900
+        )
     };
   }
 
@@ -2087,6 +2141,11 @@ export function HyattTierListClient({
 
     if (payload.stayType === 'EXPLORED' && !payload.tier) {
       setErrorMessage('Select a tier.');
+      return;
+    }
+
+    if (payload.stayType === 'FUTURE' && payload.stayEntries.length === 0) {
+      setErrorMessage('Add at least one planned month and year for this future stay.');
       return;
     }
 
@@ -2628,61 +2687,18 @@ export function HyattTierListClient({
             className={`mt-4 rounded-[24px] border border-dashed border-[rgba(0,102,179,0.14)] ${
               isCompactMode ? 'bg-white/78 p-2.5 sm:p-3' : 'bg-white/40 p-3 sm:p-4'
             }`}
-            onDragOver={(event) => {
-              const activeDraggedHotel = hotels.find(
-                (hotel) => hotel.id === (draggedHotelIdRef.current ?? draggedHotelId)
-              );
-
-              if (!activeDraggedHotel || activeDraggedHotel.stayType !== 'FUTURE') {
-                return;
-              }
-
-              event.preventDefault();
-              setDropTarget(resolveDropTargetFromPointer(event, 'FUTURE', null));
-            }}
-            onDrop={(event) => {
-              const activeDraggedHotel = hotels.find(
-                (hotel) => hotel.id === (draggedHotelIdRef.current ?? draggedHotelId)
-              );
-
-              if (!activeDraggedHotel || activeDraggedHotel.stayType !== 'FUTURE') {
-                return;
-              }
-
-              event.preventDefault();
-              const target = resolveDropTargetFromPointer(event, 'FUTURE', null);
-              void handleDropOnTarget(target.stayType, target.tier, target.beforeHotelId);
-            }}
-            style={{
-              outline: dropTarget?.stayType === 'FUTURE' ? '2px solid rgba(0,102,179,0.18)' : 'none',
-              outlineOffset: '3px'
-            }}
           >
             <div className={isCompactMode ? 'flex min-h-[72px] flex-wrap content-start gap-1.5 sm:min-h-[80px]' : 'mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5'}>
               {futureHotels.length ? (
                 futureHotels.map((hotel) => {
                   const brandColor = BRAND_BY_NAME[hotel.brand]?.color || '#7A1F2C';
                   const brandStyle = getBrandVisualStyle(hotel.brand, brandColor);
+                  const plannedStay = getPrimaryFutureStayEntry(hotel);
 
                   return (
                     <div
                       key={hotel.id}
                       data-hotel-id={hotel.id}
-                      draggable
-                      onDragStart={(event) => {
-                        draggedHotelIdRef.current = hotel.id;
-                        setDraggedHotelId(hotel.id);
-                        setDropTarget({ stayType: 'FUTURE', tier: null, beforeHotelId: hotel.id });
-                        setRecentlyDraggedHotelId(hotel.id);
-                        event.dataTransfer.effectAllowed = 'move';
-                        event.dataTransfer.setData('text/plain', hotel.id);
-                      }}
-                      onDragEnd={() => {
-                        window.setTimeout(() => {
-                          setRecentlyDraggedHotelId(null);
-                        }, 0);
-                        resetDragState();
-                      }}
                       onClick={() => handleHotelClick(hotel)}
                       onKeyDown={(event) => {
                         if (event.key === 'Enter' || event.key === ' ') {
@@ -2696,13 +2712,12 @@ export function HyattTierListClient({
                         isCompactMode ? 'rounded-[10px] px-2.5 py-1.5' : 'min-h-[68px] rounded-[16px] px-3 py-2.5 sm:min-h-[72px]'
                       }`}
                       style={{
-                        borderColor: dropTarget?.stayType === 'FUTURE' && dropTarget.beforeHotelId === hotel.id ? `${brandColor}BB` : brandStyle.borderColor,
+                        borderColor: brandStyle.borderColor,
                         background: isCompactMode
                           ? `linear-gradient(135deg, ${rgba(brandStyle.dotColor, 0.16)} 0%, rgba(255,255,255,0.96) 70%)`
                           : brandStyle.background,
                         boxShadow: `inset 0 1px 0 rgba(255,255,255,0.8), 0 14px 30px ${brandStyle.shadowColor}`,
-                        opacity: draggedHotelId === hotel.id ? 0.55 : 1,
-                        cursor: draggedHotelId === hotel.id ? 'grabbing' : 'grab'
+                        cursor: 'pointer'
                       }}
                     >
                       <div className={`flex ${isCompactMode ? 'items-center justify-start' : 'items-start justify-between'} gap-2.5`}>
@@ -2714,6 +2729,11 @@ export function HyattTierListClient({
                           }`}>
                             {hotel.name}
                           </div>
+                          {!isCompactMode ? (
+                            <div className="mt-1 text-[0.68rem] font-semibold uppercase tracking-[0.14em] text-[rgba(34,58,86,0.58)]">
+                              {formatMonthYear(plannedStay)}
+                            </div>
+                          ) : null}
                         </div>
                         {!isCompactMode ? (
                           <div className="mt-0.5 flex shrink-0 items-center gap-1.5">
@@ -3486,7 +3506,7 @@ export function HyattTierListClient({
                               <div className="mt-1 text-xs uppercase tracking-[0.14em] text-[rgba(34,58,86,0.52)]">
                                 {stayType === 'EXPLORED'
                                   ? `${hotel.tier ?? 'Unranked'}${hotel.tier ? '-Tier' : ''}`
-                                  : 'Planned'}
+                                    : formatMonthYear(getPrimaryFutureStayEntry(hotel))}
                               </div>
                               {hotel.roomEntries.length ? (
                                 <div className="mt-2 text-sm text-[rgba(34,58,86,0.68)]">
@@ -4393,7 +4413,13 @@ export function HyattTierListClient({
                       setDraft((current) => ({
                         ...current,
                         stayType: value as StayType,
-                        tier: value === 'EXPLORED' ? current.tier ?? 'S' : null
+                        tier: value === 'EXPLORED' ? current.tier ?? 'S' : null,
+                        stayEntries:
+                          current.stayEntries.length > 0
+                            ? current.stayEntries
+                            : value === 'FUTURE'
+                              ? [{ ...EMPTY_STAY_ENTRY, id: crypto.randomUUID() }]
+                              : current.stayEntries
                       }))
                     }
                     options={STAY_TYPE_OPTIONS}
@@ -4517,75 +4543,77 @@ export function HyattTierListClient({
                   )}
                 </div>
 
-                {draft.stayType === 'EXPLORED' ? (
-                  <div className="space-y-3 md:col-span-2">
-                    <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                      <div>
-                        <div className="text-sm font-semibold text-[rgb(var(--page-foreground))]">Travel Timeline</div>
-                        <div className="mt-1 text-xs text-[rgba(34,58,86,0.58)]">
-                          Add each month and year you stayed at this property. Multiple stays in the same month are allowed.
-                        </div>
+                <div className="space-y-3 md:col-span-2">
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                    <div>
+                      <div className="text-sm font-semibold text-[rgb(var(--page-foreground))]">
+                        {draft.stayType === 'EXPLORED' ? 'Travel Timeline' : 'Planned Stay Timing'}
                       </div>
-
-                      <button
-                        type="button"
-                        onClick={addStayEntry}
-                        className="inline-flex items-center justify-center whitespace-nowrap rounded-full border border-[rgba(0,102,179,0.16)] bg-white/82 px-4 py-2 text-sm font-semibold text-[rgb(var(--wine))] transition hover:bg-[rgba(0,102,179,0.06)]"
-                      >
-                        Add stay
-                      </button>
+                      <div className="mt-1 text-xs text-[rgba(34,58,86,0.58)]">
+                        {draft.stayType === 'EXPLORED'
+                          ? 'Add each month and year you stayed at this property. Multiple stays in the same month are allowed.'
+                          : 'Add the month and year for your planned stay. If you have multiple upcoming stays, add each one.'}
+                      </div>
                     </div>
 
-                    {draft.stayEntries.length ? (
-                      <div className="space-y-3">
-                        {draft.stayEntries.map((entry, index) => (
-                          <div
-                            key={entry.id}
-                            className="grid gap-3 rounded-[20px] border border-[rgba(0,102,179,0.1)] bg-white/72 p-3 md:grid-cols-[minmax(0,1fr)_9rem_auto]"
-                          >
-                            <FancySelect
-                              value={String(entry.month)}
-                              onChange={(value) =>
-                                updateStayEntry(index, (current) => ({
-                                  ...current,
-                                  month: Number(value)
-                                }))
-                              }
-                              options={MONTH_OPTIONS}
-                            />
-
-                            <input
-                              type="number"
-                              min={1900}
-                              max={2100}
-                              value={entry.year}
-                              onChange={(event) =>
-                                updateStayEntry(index, (current) => ({
-                                  ...current,
-                                  year: Number(event.target.value)
-                                }))
-                              }
-                              placeholder="2026"
-                              className="w-full rounded-[16px] border border-[rgba(118,31,47,0.14)] bg-white/92 px-4 py-3 text-sm text-[rgb(var(--page-foreground))] outline-none transition focus:border-[rgba(118,31,47,0.32)] focus:ring-4 focus:ring-[rgba(118,31,47,0.08)]"
-                            />
-
-                            <button
-                              type="button"
-                              onClick={() => removeStayEntry(index)}
-                              className="inline-flex items-center justify-center rounded-full border border-[rgba(163,33,48,0.18)] bg-[rgba(163,33,48,0.08)] px-4 py-2 text-sm font-semibold text-[#a32130] transition hover:bg-[rgba(163,33,48,0.12)]"
-                            >
-                              Remove
-                            </button>
-                          </div>
-                        ))}
-                      </div>
-                    ) : (
-                      <div className="rounded-[18px] border border-dashed border-[rgba(0,102,179,0.16)] bg-white/55 p-4 text-sm text-[rgba(34,58,86,0.58)]">
-                        No stay months added yet.
-                      </div>
-                    )}
+                    <button
+                      type="button"
+                      onClick={addStayEntry}
+                      className="inline-flex items-center justify-center whitespace-nowrap rounded-full border border-[rgba(0,102,179,0.16)] bg-white/82 px-4 py-2 text-sm font-semibold text-[rgb(var(--wine))] transition hover:bg-[rgba(0,102,179,0.06)]"
+                    >
+                      {draft.stayType === 'EXPLORED' ? 'Add stay' : 'Add planned stay'}
+                    </button>
                   </div>
-                ) : null}
+
+                  {draft.stayEntries.length ? (
+                    <div className="space-y-3">
+                      {draft.stayEntries.map((entry, index) => (
+                        <div
+                          key={entry.id}
+                          className="grid gap-3 rounded-[20px] border border-[rgba(0,102,179,0.1)] bg-white/72 p-3 md:grid-cols-[minmax(0,1fr)_9rem_auto]"
+                        >
+                          <FancySelect
+                            value={String(entry.month)}
+                            onChange={(value) =>
+                              updateStayEntry(index, (current) => ({
+                                ...current,
+                                month: Number(value)
+                              }))
+                            }
+                            options={MONTH_OPTIONS}
+                          />
+
+                          <input
+                            type="number"
+                            min={1900}
+                            max={2100}
+                            value={entry.year}
+                            onChange={(event) =>
+                              updateStayEntry(index, (current) => ({
+                                ...current,
+                                year: Number(event.target.value)
+                              }))
+                            }
+                            placeholder="2026"
+                            className="w-full rounded-[16px] border border-[rgba(118,31,47,0.14)] bg-white/92 px-4 py-3 text-sm text-[rgb(var(--page-foreground))] outline-none transition focus:border-[rgba(118,31,47,0.32)] focus:ring-4 focus:ring-[rgba(118,31,47,0.08)]"
+                          />
+
+                          <button
+                            type="button"
+                            onClick={() => removeStayEntry(index)}
+                            className="inline-flex items-center justify-center rounded-full border border-[rgba(163,33,48,0.18)] bg-[rgba(163,33,48,0.08)] px-4 py-2 text-sm font-semibold text-[#a32130] transition hover:bg-[rgba(163,33,48,0.12)]"
+                          >
+                            Remove
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="rounded-[18px] border border-dashed border-[rgba(0,102,179,0.16)] bg-white/55 p-4 text-sm text-[rgba(34,58,86,0.58)]">
+                      {draft.stayType === 'EXPLORED' ? 'No stay months added yet.' : 'No planned stay months added yet.'}
+                    </div>
+                  )}
+                </div>
               </div>
 
               {errorMessage ? (
