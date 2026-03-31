@@ -853,6 +853,8 @@ export function HyattTierListClient({
   const [activeSuiteSlideIndex, setActiveSuiteSlideIndex] = useState(0);
   const suiteSwipeStartXRef = useRef<number | null>(null);
   const suiteSwipeDeltaXRef = useRef(0);
+  const tierBoardSectionRef = useRef<HTMLElement | null>(null);
+  const futureHotelsSectionRef = useRef<HTMLElement | null>(null);
   const suiteExplorationsSectionRef = useRef<HTMLElement | null>(null);
   const [isAllBrandsOpen, setIsAllBrandsOpen] = useState(false);
   const [isExploredBrandsOpen, setIsExploredBrandsOpen] = useState(false);
@@ -1638,6 +1640,14 @@ export function HyattTierListClient({
     suiteExplorationsSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
 
+  function scrollToTierBoard() {
+    tierBoardSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+
+  function scrollToFutureHotels() {
+    futureHotelsSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+
   async function persistDashboardPreferences(nextPreferences: DashboardPreferencesPatch) {
     if (persistenceMode === 'local') {
       return;
@@ -2284,10 +2294,26 @@ export function HyattTierListClient({
                 {summaryCards.map((card) => (
                   <div key={card.label} className="soft-ring rounded-[20px] bg-white/82 p-3 sm:rounded-[24px] sm:p-4">
                     <div className="text-[0.62rem] uppercase tracking-[0.14em] text-[rgba(34,58,86,0.52)] sm:text-[0.72rem] sm:tracking-[0.16em]">
-                      {card.label === 'Brands Explored' ? (
+                      {card.label === 'Hotels Explored' ? (
+                        <button
+                          type="button"
+                          onClick={scrollToTierBoard}
+                          className="block w-full text-left align-top text-[0.62rem] uppercase tracking-[0.14em] text-[rgba(34,58,86,0.52)] transition hover:text-[rgb(var(--wine))] sm:text-[0.72rem] sm:tracking-[0.16em]"
+                        >
+                          {card.label}
+                        </button>
+                      ) : card.label === 'Brands Explored' ? (
                         <button
                           type="button"
                           onClick={() => setIsExploredBrandsOpen(true)}
+                          className="block w-full text-left align-top text-[0.62rem] uppercase tracking-[0.14em] text-[rgba(34,58,86,0.52)] transition hover:text-[rgb(var(--wine))] sm:text-[0.72rem] sm:tracking-[0.16em]"
+                        >
+                          {card.label}
+                        </button>
+                      ) : card.label === 'Planned Hotel Explorations' ? (
+                        <button
+                          type="button"
+                          onClick={scrollToFutureHotels}
                           className="block w-full text-left align-top text-[0.62rem] uppercase tracking-[0.14em] text-[rgba(34,58,86,0.52)] transition hover:text-[rgb(var(--wine))] sm:text-[0.72rem] sm:tracking-[0.16em]"
                         >
                           {card.label}
@@ -2304,7 +2330,7 @@ export function HyattTierListClient({
                         <button
                           type="button"
                           onClick={() => setIsFutureBrandsOpen(true)}
-                          className="block w-full whitespace-nowrap text-left align-top text-[0.54rem] uppercase tracking-[0.08em] text-[rgba(34,58,86,0.52)] transition hover:text-[rgb(var(--wine))] sm:text-[0.62rem] sm:tracking-[0.1em] lg:text-[0.68rem]"
+                          className="block w-full text-left align-top text-[0.62rem] uppercase tracking-[0.14em] text-[rgba(34,58,86,0.52)] transition hover:text-[rgb(var(--wine))] sm:text-[0.72rem] sm:tracking-[0.16em]"
                         >
                           {card.label}
                         </button>
@@ -2467,7 +2493,11 @@ export function HyattTierListClient({
         ) : null}
 
         {displayPreferences.showTierBoard ? (
-        <section className="glass-panel rounded-[28px] px-4 py-4 sm:px-5 sm:py-5" style={{ order: getSectionOrder('tierBoard') }}>
+        <section
+          ref={tierBoardSectionRef}
+          className="glass-panel rounded-[28px] px-4 py-4 sm:px-5 sm:py-5"
+          style={{ order: getSectionOrder('tierBoard') }}
+        >
           <div className="flex items-center justify-between gap-3">
             <p className="section-label">Tier Board</p>
           </div>
@@ -2671,7 +2701,11 @@ export function HyattTierListClient({
         ) : null}
 
         {displayPreferences.showFutureHotels ? (
-        <section className="glass-panel rounded-[28px] px-4 py-4 sm:px-5 sm:py-5" style={{ order: getSectionOrder('futureHotels') }}>
+        <section
+          ref={futureHotelsSectionRef}
+          className="glass-panel rounded-[28px] px-4 py-4 sm:px-5 sm:py-5"
+          style={{ order: getSectionOrder('futureHotels') }}
+        >
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <p className="section-label">Planned Hotel Explorations</p>
