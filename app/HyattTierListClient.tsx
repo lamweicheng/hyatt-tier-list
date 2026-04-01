@@ -41,7 +41,9 @@ const DEFAULT_DRAFT: HotelDraft = {
   stayType: 'EXPLORED',
   tier: 'S',
   roomEntries: [],
-  stayEntries: []
+  stayEntries: [],
+  bucketListLocation: '',
+  bucketListImageUrl: ''
 };
 
 const EMPTY_ROOM_ENTRY: RoomEntry = {
@@ -79,7 +81,8 @@ const ROOM_KIND_OPTIONS: Array<{ value: RoomEntryKind; label: string }> = [
 
 const STAY_TYPE_OPTIONS: Array<{ value: StayType; label: string }> = [
   { value: 'EXPLORED', label: 'Explored' },
-  { value: 'FUTURE', label: 'Future' }
+  { value: 'FUTURE', label: 'Future' },
+  { value: 'BUCKET_LIST', label: 'Bucket List' }
 ];
 
 const MONTH_OPTIONS = MONTH_LABELS.map((label, index) => ({
@@ -178,6 +181,13 @@ type LoggedSuiteEntry = {
   hotel: HotelRecord;
 };
 
+type BucketListSlide = {
+  id: string;
+  imageUrl: string;
+  location: string;
+  hotel: HotelRecord;
+};
+
 const DEFAULT_TOP_PICKS: TopPickSlot[] = [
   { rank: 1, hotelId: '', imageUrl: '' },
   { rank: 2, hotelId: '', imageUrl: '' },
@@ -221,6 +231,7 @@ const DEFAULT_SECTION_ORDER: DashboardSectionId[] = [
   'futureHotels',
   'travelTimeline',
   'suiteSlideshow',
+  'bucketListSlideshow',
   'topFutureStays',
   'topExperiences',
   'topUnderrated',
@@ -234,6 +245,7 @@ const DEFAULT_DISPLAY_PREFERENCES: DisplayPreferences = {
   showFutureHotels: true,
   showTravelTimeline: true,
   showSuiteSlideshow: true,
+  showBucketListSlideshow: true,
   showTopFutureStays: true,
   showTopExperiences: true,
   showTopUnderrated: true,
@@ -360,7 +372,12 @@ function formatMonthYear(entry: StayEntry | null) {
 
 function normalizeHotelRecord(value: unknown): HotelRecord {
   const raw = (typeof value === 'object' && value !== null ? value : {}) as Record<string, unknown>;
-  const stayType: StayType = raw.stayType === 'FUTURE' ? 'FUTURE' : 'EXPLORED';
+  const stayType: StayType =
+    raw.stayType === 'FUTURE'
+      ? 'FUTURE'
+      : raw.stayType === 'BUCKET_LIST'
+        ? 'BUCKET_LIST'
+        : 'EXPLORED';
   const tier = stayType === 'EXPLORED' && isTier(raw.tier) ? raw.tier : null;
   const timestamp = new Date().toISOString();
 
@@ -375,6 +392,8 @@ function normalizeHotelRecord(value: unknown): HotelRecord {
     tier,
     roomEntries: normalizeRoomEntries(raw.roomEntries),
     stayEntries: normalizeStayEntries(raw.stayEntries),
+    bucketListLocation: typeof raw.bucketListLocation === 'string' ? raw.bucketListLocation : '',
+    bucketListImageUrl: typeof raw.bucketListImageUrl === 'string' ? raw.bucketListImageUrl : '',
     position: typeof raw.position === 'number' && Number.isInteger(raw.position) ? raw.position : 0,
     createdAt: typeof raw.createdAt === 'string' ? raw.createdAt : timestamp,
     updatedAt: typeof raw.updatedAt === 'string' ? raw.updatedAt : timestamp
@@ -402,7 +421,17 @@ function normalizeHotelCollection(hotels: HotelRecord[]) {
     roomEntries: hotel.roomEntries
   }));
 
-  return sortHotelsByTier([...explored, ...future]);
+  const bucketList = sortHotelsByTier(
+    normalizedHotels.filter((hotel) => hotel.stayType === 'BUCKET_LIST')
+  ).map((hotel, index) => ({
+    ...hotel,
+    tier: null,
+    position: index,
+    roomEntries: [],
+    stayEntries: []
+  }));
+
+  return sortHotelsByTier([...explored, ...future, ...bucketList]);
 }
 
 function createLocalHotel(payload: HotelDraft): HotelRecord {
@@ -757,6 +786,10 @@ function normalizeDisplayPreferences(value: unknown): DisplayPreferences {
       typeof record.showSuiteSlideshow === 'boolean'
         ? record.showSuiteSlideshow
         : DEFAULT_DISPLAY_PREFERENCES.showSuiteSlideshow,
+    showBucketListSlideshow:
+      typeof record.showBucketListSlideshow === 'boolean'
+        ? record.showBucketListSlideshow
+        : DEFAULT_DISPLAY_PREFERENCES.showBucketListSlideshow,
     showTopFutureStays:
       typeof record.showTopFutureStays === 'boolean'
         ? record.showTopFutureStays
@@ -851,11 +884,15 @@ export function HyattTierListClient({
   const [isCompactMode, setIsCompactMode] = useState(false);
   const [isTravelTimelineCompactMode, setIsTravelTimelineCompactMode] = useState(false);
   const [activeSuiteSlideIndex, setActiveSuiteSlideIndex] = useState(0);
+  const [activeBucketListSlideIndex, setActiveBucketListSlideIndex] = useState(0);
   const suiteSwipeStartXRef = useRef<number | null>(null);
   const suiteSwipeDeltaXRef = useRef(0);
+  const bucketListSwipeStartXRef = useRef<number | null>(null);
+  const bucketListSwipeDeltaXRef = useRef(0);
   const tierBoardSectionRef = useRef<HTMLElement | null>(null);
   const futureHotelsSectionRef = useRef<HTMLElement | null>(null);
   const suiteExplorationsSectionRef = useRef<HTMLElement | null>(null);
+  const bucketListSectionRef = useRef<HTMLElement | null>(null);
   const [isAllBrandsOpen, setIsAllBrandsOpen] = useState(false);
   const [isExploredBrandsOpen, setIsExploredBrandsOpen] = useState(false);
   const [isFutureBrandsOpen, setIsFutureBrandsOpen] = useState(false);
@@ -1069,6 +1106,10 @@ export function HyattTierListClient({
     () => sortFutureHotelsByPlannedDate(hotels.filter((hotel) => hotel.stayType === 'FUTURE')),
     [hotels]
   );
+  const bucketListHotels = useMemo(
+    () => sortHotelsByTier(hotels.filter((hotel) => hotel.stayType === 'BUCKET_LIST')),
+    [hotels]
+  );
 
   const hotelsByTier = useMemo(() => {
     return TIERS.reduce(
@@ -1114,6 +1155,18 @@ export function HyattTierListClient({
       ),
     [exploredHotels]
   );
+  const bucketListSlides = useMemo<BucketListSlide[]>(
+    () =>
+      bucketListHotels
+        .filter((hotel) => hotel.bucketListLocation.trim() && hotel.bucketListImageUrl.trim())
+        .map((hotel) => ({
+          id: hotel.id,
+          imageUrl: hotel.bucketListImageUrl,
+          location: hotel.bucketListLocation,
+          hotel
+        })),
+    [bucketListHotels]
+  );
   useEffect(() => {
     setActiveSuiteSlideIndex((current) => {
       if (loggedSuiteSlides.length === 0) {
@@ -1124,6 +1177,16 @@ export function HyattTierListClient({
     });
   }, [loggedSuiteSlides.length]);
 
+  useEffect(() => {
+    setActiveBucketListSlideIndex((current) => {
+      if (bucketListSlides.length === 0) {
+        return 0;
+      }
+
+      return Math.min(current, bucketListSlides.length - 1);
+    });
+  }, [bucketListSlides.length]);
+
   function showPreviousSuiteSlide() {
     setActiveSuiteSlideIndex((current) =>
       loggedSuiteSlides.length ? (current - 1 + loggedSuiteSlides.length) % loggedSuiteSlides.length : 0
@@ -1132,6 +1195,18 @@ export function HyattTierListClient({
 
   function showNextSuiteSlide() {
     setActiveSuiteSlideIndex((current) => (loggedSuiteSlides.length ? (current + 1) % loggedSuiteSlides.length : 0));
+  }
+
+  function showPreviousBucketListSlide() {
+    setActiveBucketListSlideIndex((current) =>
+      bucketListSlides.length ? (current - 1 + bucketListSlides.length) % bucketListSlides.length : 0
+    );
+  }
+
+  function showNextBucketListSlide() {
+    setActiveBucketListSlideIndex((current) =>
+      bucketListSlides.length ? (current + 1) % bucketListSlides.length : 0
+    );
   }
 
   useEffect(() => {
@@ -1169,6 +1244,41 @@ export function HyattTierListClient({
     return () => window.removeEventListener('keydown', handleSuiteSlideshowKeydown);
   }, [displayPreferences.showSuiteSlideshow, loggedSuiteSlides.length]);
 
+  useEffect(() => {
+    if (!displayPreferences.showBucketListSlideshow || bucketListSlides.length <= 1) {
+      return;
+    }
+
+    const slideCount = bucketListSlides.length;
+
+    function handleBucketListSlideshowKeydown(event: KeyboardEvent) {
+      const target = event.target;
+
+      if (
+        target instanceof HTMLElement &&
+        (target.tagName === 'INPUT' ||
+          target.tagName === 'TEXTAREA' ||
+          target.tagName === 'SELECT' ||
+          target.isContentEditable)
+      ) {
+        return;
+      }
+
+      if (event.key === 'ArrowLeft') {
+        event.preventDefault();
+        setActiveBucketListSlideIndex((current) => ((current - 1 + slideCount) % slideCount));
+      }
+
+      if (event.key === 'ArrowRight') {
+        event.preventDefault();
+        setActiveBucketListSlideIndex((current) => ((current + 1) % slideCount));
+      }
+    }
+
+    window.addEventListener('keydown', handleBucketListSlideshowKeydown);
+    return () => window.removeEventListener('keydown', handleBucketListSlideshowKeydown);
+  }, [bucketListSlides.length, displayPreferences.showBucketListSlideshow]);
+
   const activeSuiteSlide = loggedSuiteSlides[activeSuiteSlideIndex] ?? null;
   const previousSuiteSlide =
     loggedSuiteSlides.length > 1
@@ -1177,6 +1287,15 @@ export function HyattTierListClient({
   const nextSuiteSlide =
     loggedSuiteSlides.length > 1
       ? loggedSuiteSlides[(activeSuiteSlideIndex + 1) % loggedSuiteSlides.length]
+      : null;
+  const activeBucketListSlide = bucketListSlides[activeBucketListSlideIndex] ?? null;
+  const previousBucketListSlide =
+    bucketListSlides.length > 1
+      ? bucketListSlides[(activeBucketListSlideIndex - 1 + bucketListSlides.length) % bucketListSlides.length]
+      : null;
+  const nextBucketListSlide =
+    bucketListSlides.length > 1
+      ? bucketListSlides[(activeBucketListSlideIndex + 1) % bucketListSlides.length]
       : null;
   const exploredHotelsWithSuites = useMemo(
     () => exploredHotels.filter((hotel) => hotel.roomEntries.some((entry) => entry.kind === 'SUITE')),
@@ -1190,7 +1309,8 @@ export function HyattTierListClient({
     const brandHotels = hotels.filter((hotel) => hotel.brand === selectedBrandName);
     return [
       ...sortHotelsByTier(brandHotels.filter((hotel) => hotel.stayType === 'EXPLORED')),
-      ...sortFutureHotelsByPlannedDate(brandHotels.filter((hotel) => hotel.stayType === 'FUTURE'))
+      ...sortFutureHotelsByPlannedDate(brandHotels.filter((hotel) => hotel.stayType === 'FUTURE')),
+      ...sortHotelsByTier(brandHotels.filter((hotel) => hotel.stayType === 'BUCKET_LIST'))
     ];
   }, [hotels, selectedBrandName]);
   const topPicksResolved = useMemo(
@@ -1508,6 +1628,17 @@ export function HyattTierListClient({
         void updateDisplayPreferences({
           ...displayPreferences,
           showSuiteSlideshow: !displayPreferences.showSuiteSlideshow
+        })
+    },
+    {
+      id: 'bucketListSlideshow' as const,
+      label: 'My Hyatt Bucket List',
+      description: 'Show or hide your bucket-list hotel carousel.',
+      shown: displayPreferences.showBucketListSlideshow,
+      toggle: () =>
+        void updateDisplayPreferences({
+          ...displayPreferences,
+          showBucketListSlideshow: !displayPreferences.showBucketListSlideshow
         })
     },
     {
@@ -1937,7 +2068,9 @@ export function HyattTierListClient({
       stayType: hotel.stayType,
       tier: hotel.tier,
       roomEntries: hotel.roomEntries.length ? hotel.roomEntries : [],
-      stayEntries: hotel.stayEntries.length ? hotel.stayEntries : []
+      stayEntries: hotel.stayEntries.length ? hotel.stayEntries : [],
+      bucketListLocation: hotel.bucketListLocation,
+      bucketListImageUrl: hotel.bucketListImageUrl
     });
     setErrorMessage(null);
     setModalState({ mode: 'edit', hotelId: hotel.id });
@@ -2121,8 +2254,9 @@ export function HyattTierListClient({
       brand: draft.brand,
       stayType: draft.stayType,
       tier: draft.stayType === 'EXPLORED' ? draft.tier ?? 'S' : null,
-      roomEntries: cleanedRoomEntries,
-      stayEntries: draft.stayEntries
+      roomEntries: draft.stayType === 'BUCKET_LIST' ? [] : cleanedRoomEntries,
+      stayEntries: draft.stayType === 'FUTURE'
+        ? draft.stayEntries
         .map((entry) => ({
           id: entry.id || crypto.randomUUID(),
           month: Number(entry.month),
@@ -2136,6 +2270,9 @@ export function HyattTierListClient({
             Number.isInteger(entry.year) &&
             entry.year >= 1900
         )
+        : [],
+      bucketListLocation: draft.stayType === 'BUCKET_LIST' ? draft.bucketListLocation.trim() : '',
+      bucketListImageUrl: draft.stayType === 'BUCKET_LIST' ? draft.bucketListImageUrl.trim() : ''
     };
   }
 
@@ -2156,6 +2293,16 @@ export function HyattTierListClient({
 
     if (payload.stayType === 'FUTURE' && payload.stayEntries.length === 0) {
       setErrorMessage('Add at least one planned month and year for this future stay.');
+      return;
+    }
+
+    if (payload.stayType === 'BUCKET_LIST' && !payload.bucketListLocation) {
+      setErrorMessage('Add a location for this bucket-list hotel.');
+      return;
+    }
+
+    if (payload.stayType === 'BUCKET_LIST' && !payload.bucketListImageUrl) {
+      setErrorMessage('Add a photo URL for this bucket-list hotel.');
       return;
     }
 
@@ -3079,6 +3226,171 @@ export function HyattTierListClient({
         </section>
         ) : null}
 
+        {displayPreferences.showBucketListSlideshow ? (
+        <section
+          ref={bucketListSectionRef}
+          className="glass-panel rounded-[28px] px-4 py-4 sm:px-5 sm:py-5"
+          style={{ order: getSectionOrder('bucketListSlideshow') }}
+        >
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <p className="section-label">My Hyatt Bucket List</p>
+            </div>
+
+            {bucketListSlides.length ? (
+              <div className="rounded-full border border-white/80 bg-white/75 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-[rgba(34,58,86,0.58)]">
+                {activeBucketListSlideIndex + 1} / {bucketListSlides.length}
+              </div>
+            ) : null}
+          </div>
+
+          {activeBucketListSlide ? (
+            <div className="mt-5 space-y-4">
+              <article className="overflow-hidden rounded-[36px] border border-white/8 bg-[#0a121b] shadow-[0_28px_80px_rgba(8,25,43,0.38)]">
+                <div
+                  className="relative min-h-[480px] bg-[#0a121b] sm:min-h-[720px]"
+                  onPointerDown={(event) => {
+                    bucketListSwipeStartXRef.current = event.clientX;
+                    bucketListSwipeDeltaXRef.current = 0;
+                  }}
+                  onPointerMove={(event) => {
+                    if (bucketListSwipeStartXRef.current === null) {
+                      return;
+                    }
+
+                    bucketListSwipeDeltaXRef.current = event.clientX - bucketListSwipeStartXRef.current;
+                  }}
+                  onPointerUp={() => {
+                    if (bucketListSwipeStartXRef.current === null) {
+                      return;
+                    }
+
+                    if (bucketListSwipeDeltaXRef.current <= -50) {
+                      showNextBucketListSlide();
+                    } else if (bucketListSwipeDeltaXRef.current >= 50) {
+                      showPreviousBucketListSlide();
+                    }
+
+                    bucketListSwipeStartXRef.current = null;
+                    bucketListSwipeDeltaXRef.current = 0;
+                  }}
+                  onPointerCancel={() => {
+                    bucketListSwipeStartXRef.current = null;
+                    bucketListSwipeDeltaXRef.current = 0;
+                  }}
+                  onPointerLeave={() => {
+                    bucketListSwipeStartXRef.current = null;
+                    bucketListSwipeDeltaXRef.current = 0;
+                  }}
+                >
+                  <UserPhoto
+                    src={activeBucketListSlide.imageUrl}
+                    alt={`${activeBucketListSlide.hotel.name} in ${activeBucketListSlide.location}`}
+                    eager
+                    className="absolute inset-0 h-full w-full object-cover scale-[1.08] blur-[10px] opacity-35"
+                  />
+
+                  <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(255,255,255,0.08),transparent_42%),linear-gradient(180deg,rgba(6,14,22,0.18),rgba(6,14,22,0.66)_52%,rgba(6,14,22,0.92))]" />
+
+                  <button
+                    type="button"
+                    onClick={showPreviousBucketListSlide}
+                    className="absolute left-3 top-1/2 z-20 inline-flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full border border-white/18 bg-[rgba(255,255,255,0.1)] text-lg font-semibold text-white backdrop-blur-md transition hover:bg-[rgba(255,255,255,0.18)] sm:left-6 sm:h-12 sm:w-12"
+                    aria-label="Show previous bucket-list hotel"
+                  >
+                    ←
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={showNextBucketListSlide}
+                    className="absolute right-3 top-1/2 z-20 inline-flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full border border-white/18 bg-[rgba(255,255,255,0.1)] text-lg font-semibold text-white backdrop-blur-md transition hover:bg-[rgba(255,255,255,0.18)] sm:right-6 sm:h-12 sm:w-12"
+                    aria-label="Show next bucket-list hotel"
+                  >
+                    →
+                  </button>
+
+                  <div className="absolute inset-x-0 top-1/2 z-10 flex -translate-y-1/2 items-center justify-center gap-4 px-3 sm:gap-10 sm:px-8 lg:px-10">
+                    {previousBucketListSlide ? (
+                      <button
+                        type="button"
+                        onClick={showPreviousBucketListSlide}
+                        className="group relative hidden h-[300px] w-[190px] shrink-0 overflow-hidden rounded-[26px] border border-white/10 shadow-[0_22px_40px_rgba(0,0,0,0.28)] transition hover:-translate-x-1 hover:border-white/18 sm:block md:h-[430px] md:w-[280px] lg:h-[520px] lg:w-[320px] xl:-ml-14"
+                        aria-label={`Preview previous bucket-list hotel: ${previousBucketListSlide.hotel.name}`}
+                      >
+                        <UserPhoto
+                          src={previousBucketListSlide.imageUrl}
+                          alt={`${previousBucketListSlide.hotel.name} in ${previousBucketListSlide.location}`}
+                          className="absolute inset-0 h-full w-full object-cover grayscale-[0.18] opacity-70 transition group-hover:opacity-82"
+                        />
+                        <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(7,18,28,0.16),rgba(7,18,28,0.82))]" />
+                      </button>
+                    ) : null}
+
+                    <div className="relative h-[340px] w-[320px] shrink-0 overflow-hidden rounded-[30px] border border-white/14 shadow-[0_30px_70px_rgba(0,0,0,0.34)] sm:h-[440px] sm:w-[470px] md:h-[520px] md:w-[640px] lg:h-[560px] lg:w-[760px] xl:h-[600px] xl:w-[860px]">
+                      <UserPhoto
+                        src={activeBucketListSlide.imageUrl}
+                        alt={`${activeBucketListSlide.hotel.name} in ${activeBucketListSlide.location}`}
+                        eager
+                        className="absolute inset-0 h-full w-full object-cover"
+                      />
+
+                      <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(10,10,10,0.03),rgba(10,10,10,0.16)_28%,rgba(10,10,10,0.72))]" />
+
+                      <div className="absolute left-3 top-3 sm:left-4 sm:top-4">
+                        <div className="inline-flex items-center rounded-full border border-white/20 bg-[rgba(255,255,255,0.12)] px-3 py-1.5 text-[0.84rem] font-semibold uppercase tracking-[0.14em] text-white shadow-[0_10px_24px_rgba(0,0,0,0.12)] backdrop-blur-md">
+                          {activeBucketListSlide.hotel.brand}
+                        </div>
+                      </div>
+
+                      <div className="absolute bottom-3 left-3 right-3 sm:bottom-4 sm:left-4 sm:right-4">
+                        <div className="w-[60%] max-w-[520px] min-w-[250px] rounded-[24px] border border-white/8 bg-[linear-gradient(145deg,rgba(24,24,24,0.1),rgba(24,24,24,0.22))] p-4 shadow-[0_18px_38px_rgba(0,0,0,0.1)] backdrop-blur-sm sm:max-w-[560px] sm:p-5">
+                          <h2 className="text-2xl font-semibold leading-tight text-white drop-shadow-[0_3px_12px_rgba(0,0,0,0.35)] sm:text-4xl">
+                            {activeBucketListSlide.hotel.name}
+                          </h2>
+                          <p className="mt-2 text-sm font-medium uppercase tracking-[0.16em] text-white drop-shadow-[0_2px_10px_rgba(0,0,0,0.45)] sm:text-base">
+                            {activeBucketListSlide.location}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+
+                    {nextBucketListSlide ? (
+                      <button
+                        type="button"
+                        onClick={showNextBucketListSlide}
+                        className="group relative hidden h-[300px] w-[190px] shrink-0 overflow-hidden rounded-[26px] border border-white/10 shadow-[0_22px_40px_rgba(0,0,0,0.28)] transition hover:translate-x-1 hover:border-white/18 sm:block md:h-[430px] md:w-[280px] lg:h-[520px] lg:w-[320px] xl:-mr-14"
+                        aria-label={`Preview next bucket-list hotel: ${nextBucketListSlide.hotel.name}`}
+                      >
+                        <UserPhoto
+                          src={nextBucketListSlide.imageUrl}
+                          alt={`${nextBucketListSlide.hotel.name} in ${nextBucketListSlide.location}`}
+                          className="absolute inset-0 h-full w-full object-cover grayscale-[0.18] opacity-70 transition group-hover:opacity-82"
+                        />
+                        <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(7,18,28,0.16),rgba(7,18,28,0.82))]" />
+                      </button>
+                    ) : null}
+                  </div>
+
+                  <div className="absolute bottom-0 left-0 right-0 z-10 px-4 pb-4 sm:px-6 sm:pb-6">
+                    <div className="h-1.5 overflow-hidden rounded-full bg-white/12">
+                      <div
+                        className="h-full rounded-full bg-white/72 transition-[width] duration-300"
+                        style={{ width: `${((activeBucketListSlideIndex + 1) / bucketListSlides.length) * 100}%` }}
+                      />
+                    </div>
+                  </div>
+                </div>
+              </article>
+            </div>
+          ) : (
+            <div className="mt-5 rounded-[22px] border border-dashed border-[rgba(0,102,179,0.16)] bg-white/58 p-5 text-sm text-[rgba(34,58,86,0.62)]">
+              Add a bucket-list hotel with a location and photo URL to build this carousel.
+            </div>
+          )}
+        </section>
+        ) : null}
+
         {displayPreferences.showTopFutureStays ? (
         <section className="glass-panel rounded-[28px] px-4 py-4 sm:px-5 sm:py-5" style={{ order: getSectionOrder('topFutureStays') }}>
           <div className="flex items-center justify-between gap-3">
@@ -3504,7 +3816,7 @@ export function HyattTierListClient({
             </div>
 
             <div className="mt-6 max-h-[70vh] space-y-5 overflow-auto pr-1">
-              {(['EXPLORED', 'FUTURE'] as const).map((stayType) => {
+              {(['EXPLORED', 'FUTURE', 'BUCKET_LIST'] as const).map((stayType) => {
                 const brandHotels = selectedBrandHotels.filter((hotel) => hotel.stayType === stayType);
 
                 if (!brandHotels.length) {
@@ -3515,7 +3827,11 @@ export function HyattTierListClient({
                   <section key={stayType} className="rounded-[24px] border border-[rgba(0,102,179,0.12)] bg-white/68 p-4">
                     <div className="mb-3 flex items-center justify-between gap-3">
                       <div className="text-sm font-semibold uppercase tracking-[0.16em] text-[rgba(34,58,86,0.58)]">
-                        {stayType === 'EXPLORED' ? 'Explored' : 'Planned'}
+                        {stayType === 'EXPLORED'
+                          ? 'Explored'
+                          : stayType === 'FUTURE'
+                            ? 'Planned'
+                            : 'Bucket List'}
                       </div>
                       <div className="rounded-full border border-white/80 bg-white/75 px-3 py-1 text-xs font-semibold uppercase tracking-[0.16em] text-[rgba(34,58,86,0.58)]">
                         {brandHotels.length}
@@ -3540,7 +3856,9 @@ export function HyattTierListClient({
                               <div className="mt-1 text-xs uppercase tracking-[0.14em] text-[rgba(34,58,86,0.52)]">
                                 {stayType === 'EXPLORED'
                                   ? `${hotel.tier ?? 'Unranked'}${hotel.tier ? '-Tier' : ''}`
-                                    : formatMonthYear(getPrimaryFutureStayEntry(hotel))}
+                                  : stayType === 'FUTURE'
+                                    ? formatMonthYear(getPrimaryFutureStayEntry(hotel))
+                                    : hotel.bucketListLocation || 'Bucket List'}
                               </div>
                               {hotel.roomEntries.length ? (
                                 <div className="mt-2 text-sm text-[rgba(34,58,86,0.68)]">
@@ -4449,11 +4767,11 @@ export function HyattTierListClient({
                         stayType: value as StayType,
                         tier: value === 'EXPLORED' ? current.tier ?? 'S' : null,
                         stayEntries:
-                          current.stayEntries.length > 0
-                            ? current.stayEntries
-                            : value === 'FUTURE'
-                              ? [{ ...EMPTY_STAY_ENTRY, id: crypto.randomUUID() }]
-                              : current.stayEntries
+                          value === 'FUTURE'
+                            ? current.stayEntries.length > 0
+                              ? current.stayEntries
+                              : [{ ...EMPTY_STAY_ENTRY, id: crypto.randomUUID() }]
+                            : []
                       }))
                     }
                     options={STAY_TYPE_OPTIONS}
@@ -4474,6 +4792,38 @@ export function HyattTierListClient({
                   </label>
                 ) : null}
 
+                {draft.stayType === 'BUCKET_LIST' ? (
+                  <div className="space-y-3 md:col-span-2">
+                    <div>
+                      <div className="text-sm font-semibold text-[rgb(var(--page-foreground))]">Bucket List Details</div>
+                      <div className="mt-1 text-xs text-[rgba(34,58,86,0.58)]">
+                        Add the destination and a photo URL for the hotel card in your bucket-list slideshow.
+                      </div>
+                    </div>
+
+                    <div className="grid gap-3 md:grid-cols-2">
+                      <input
+                        value={draft.bucketListLocation}
+                        onChange={(event) =>
+                          setDraft((current) => ({ ...current, bucketListLocation: event.target.value }))
+                        }
+                        placeholder="Kyoto, Japan"
+                        className="w-full rounded-[16px] border border-[rgba(118,31,47,0.14)] bg-white/92 px-4 py-3 text-sm text-[rgb(var(--page-foreground))] outline-none transition focus:border-[rgba(118,31,47,0.32)] focus:ring-4 focus:ring-[rgba(118,31,47,0.08)]"
+                      />
+
+                      <input
+                        value={draft.bucketListImageUrl}
+                        onChange={(event) =>
+                          setDraft((current) => ({ ...current, bucketListImageUrl: event.target.value }))
+                        }
+                        placeholder="https://example.com/hotel-photo.jpg"
+                        className="w-full rounded-[16px] border border-[rgba(118,31,47,0.14)] bg-white/92 px-4 py-3 text-sm text-[rgb(var(--page-foreground))] outline-none transition focus:border-[rgba(118,31,47,0.32)] focus:ring-4 focus:ring-[rgba(118,31,47,0.08)]"
+                      />
+                    </div>
+                  </div>
+                ) : null}
+
+                {draft.stayType !== 'BUCKET_LIST' ? (
                 <div className="space-y-3 md:col-span-2">
                   <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                     <div>
@@ -4576,7 +4926,9 @@ export function HyattTierListClient({
                     </div>
                   )}
                 </div>
+                ) : null}
 
+                {draft.stayType !== 'BUCKET_LIST' ? (
                 <div className="space-y-3 md:col-span-2">
                   <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                     <div>
@@ -4648,6 +5000,7 @@ export function HyattTierListClient({
                     </div>
                   )}
                 </div>
+                ) : null}
               </div>
 
               {errorMessage ? (

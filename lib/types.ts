@@ -1,6 +1,6 @@
 export type Tier = 'S' | 'A' | 'B' | 'C' | 'D';
 
-export type StayType = 'EXPLORED' | 'FUTURE';
+export type StayType = 'EXPLORED' | 'FUTURE' | 'BUCKET_LIST';
 
 export type RoomEntryKind = 'ROOM' | 'SUITE';
 
@@ -30,6 +30,8 @@ export type HotelDraft = {
   tier: Tier | null;
   roomEntries: RoomEntry[];
   stayEntries: StayEntry[];
+  bucketListLocation: string;
+  bucketListImageUrl: string;
 };
 
 export type HotelRecord = HotelDraft & {
@@ -89,6 +91,7 @@ export type DashboardSectionId =
   | 'futureHotels'
   | 'travelTimeline'
   | 'suiteSlideshow'
+  | 'bucketListSlideshow'
   | 'topFutureStays'
   | 'topExperiences'
   | 'topUnderrated'
@@ -101,6 +104,7 @@ export type DisplayPreferences = {
   showFutureHotels: boolean;
   showTravelTimeline: boolean;
   showSuiteSlideshow: boolean;
+  showBucketListSlideshow: boolean;
   showTopFutureStays: boolean;
   showTopExperiences: boolean;
   showTopUnderrated: boolean;

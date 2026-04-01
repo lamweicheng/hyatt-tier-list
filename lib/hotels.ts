@@ -18,6 +18,8 @@ function toHotelRecord(hotel: {
   tier: string | null;
   roomEntries: unknown;
   stayEntries: unknown;
+  bucketListLocation: string | null;
+  bucketListImageUrl: string | null;
   position: number;
   createdAt: Date;
   updatedAt: Date;
@@ -82,6 +84,8 @@ function toHotelRecord(hotel: {
     tier: hotel.tier as HotelRecord['tier'],
     roomEntries,
     stayEntries,
+    bucketListLocation: hotel.bucketListLocation ?? '',
+    bucketListImageUrl: hotel.bucketListImageUrl ?? '',
     position: hotel.position,
     createdAt: hotel.createdAt.toISOString(),
     updatedAt: hotel.updatedAt.toISOString()
@@ -116,7 +120,9 @@ export async function createHotel(payload: HotelDraft) {
       ...data,
       position: await getNextHotelPosition(data.stayType, data.tier),
       roomEntries: data.roomEntries,
-      stayEntries: data.stayEntries
+      stayEntries: data.stayEntries,
+      bucketListLocation: data.bucketListLocation,
+      bucketListImageUrl: data.bucketListImageUrl
     }
   });
   return toHotelRecord(hotel);
@@ -140,6 +146,8 @@ export async function updateHotel(id: string, payload: HotelDraft) {
       ...data,
       roomEntries: data.roomEntries,
       stayEntries: data.stayEntries,
+      bucketListLocation: data.bucketListLocation,
+      bucketListImageUrl: data.bucketListImageUrl,
       position: nextPosition
     }
   });

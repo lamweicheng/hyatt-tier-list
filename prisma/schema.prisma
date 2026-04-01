@@ -19,23 +19,26 @@ enum Tier {
 enum StayType {
   EXPLORED
   FUTURE
+  BUCKET_LIST
 }
 
 model Hotel {
-  id        String   @id @default(cuid())
-  name      String
-  brand     String
-  stayType  StayType @default(EXPLORED)
-  tier      Tier?
-  roomEntries Json?
-  stayEntries Json?
+  id                 String   @id @default(cuid())
+  name               String
+  brand              String
+  stayType           StayType @default(EXPLORED)
+  tier               Tier?
+  roomEntries        Json?
+  stayEntries        Json?
+  bucketListLocation String?
+  bucketListImageUrl String?
   locationCity String?
   locationCountry String?
   addressLine1 String?
   postalCode String?
-  position  Int      @default(0)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  position           Int      @default(0)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
 
   @@index([stayType, tier, position])
   @@index([brand])

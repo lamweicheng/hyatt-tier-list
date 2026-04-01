@@ -71,7 +71,8 @@ const TIER_WEIGHT: Record<Tier, number> = {
 
 const STAY_TYPE_WEIGHT: Record<StayType, number> = {
   EXPLORED: 0,
-  FUTURE: 1
+  FUTURE: 1,
+  BUCKET_LIST: 2
 };
 
 export function sortHotelsByTier(hotels: HotelRecord[]) {

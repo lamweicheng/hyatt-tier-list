@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { HYATT_BRANDS, TIERS } from './hyatt-data';
 
 const BRAND_NAMES = HYATT_BRANDS.map((brand) => brand.name) as [string, ...string[]];
-const STAY_TYPES = ['EXPLORED', 'FUTURE'] as const;
+const STAY_TYPES = ['EXPLORED', 'FUTURE', 'BUCKET_LIST'] as const;
 const ROOM_ENTRY_KINDS = ['ROOM', 'SUITE'] as const;
 
 const stayEntrySchema = z.object({
@@ -27,7 +27,9 @@ export const hotelFormSchema = z
     stayType: z.enum(STAY_TYPES),
     tier: z.enum(TIERS).nullable(),
     roomEntries: z.array(roomEntrySchema).default([]),
-    stayEntries: z.array(stayEntrySchema).default([])
+    stayEntries: z.array(stayEntrySchema).default([]),
+    bucketListLocation: z.string().trim().max(120, 'Max 120 characters').default(''),
+    bucketListImageUrl: z.string().trim().max(2048, 'Max 2048 characters').default('')
   })
   .superRefine((value, ctx) => {
     if (value.stayType === 'EXPLORED' && !value.tier) {
@@ -45,6 +47,22 @@ export const hotelFormSchema = z
         message: 'Add at least one planned month and year'
       });
     }
+
+    if (value.stayType === 'BUCKET_LIST' && !value.bucketListLocation.trim()) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['bucketListLocation'],
+        message: 'Add a location for this bucket-list hotel'
+      });
+    }
+
+    if (value.stayType === 'BUCKET_LIST' && !value.bucketListImageUrl.trim()) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['bucketListImageUrl'],
+        message: 'Add a photo URL for this bucket-list hotel'
+      });
+    }
   })
   .transform((value) => ({
     ...value,
@@ -58,7 +76,9 @@ export const hotelFormSchema = z
       id: entry.id?.trim() || crypto.randomUUID(),
       month: entry.month,
       year: entry.year
-    }))
+    })),
+    bucketListLocation: value.stayType === 'BUCKET_LIST' ? value.bucketListLocation.trim() : '',
+    bucketListImageUrl: value.stayType === 'BUCKET_LIST' ? value.bucketListImageUrl.trim() : ''
   }));
 
 export type HotelFormPayload = z.infer<typeof hotelFormSchema>;
@@ -124,6 +144,7 @@ const dashboardSectionIdSchema = z.union([
   z.literal('futureHotels'),
   z.literal('travelTimeline'),
   z.literal('suiteSlideshow'),
+  z.literal('bucketListSlideshow'),
   z.literal('topFutureStays'),
   z.literal('topExperiences'),
   z.literal('topUnderrated'),
@@ -137,11 +158,12 @@ const displayPreferencesSchema = z.object({
   showFutureHotels: z.boolean(),
   showTravelTimeline: z.boolean(),
   showSuiteSlideshow: z.boolean(),
+  showBucketListSlideshow: z.boolean(),
   showTopFutureStays: z.boolean(),
   showTopExperiences: z.boolean(),
   showTopUnderrated: z.boolean(),
   showTopReturnStays: z.boolean(),
-  sectionOrder: z.array(dashboardSectionIdSchema).length(10)
+  sectionOrder: z.array(dashboardSectionIdSchema).length(11)
 });
 
 export const dashboardPreferencesSchema = z.object({
