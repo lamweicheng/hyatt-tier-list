@@ -8,6 +8,14 @@ const nextConfig = {
   images: {
     remotePatterns: [
       {
+        protocol: 'http',
+        hostname: '**'
+      },
+      {
+        protocol: 'https',
+        hostname: '**'
+      },
+      {
         protocol: 'https',
         hostname: 'assets.hyatt.com'
       }

@@ -1,5 +1,6 @@
 'use client';
 
+import Image from 'next/image';
 import { FormEvent, startTransition, useEffect, useMemo, useRef, useState } from 'react';
 import { BRAND_BY_NAME, BRANDS_BY_SEGMENT, HYATT_BRANDS, TIERS, sortHotelsByTier } from '@/lib/hyatt-data';
 import { FancySelect } from '@/components/ui/fancy-select';
@@ -262,11 +263,13 @@ type UserPhotoProps = {
 
 function UserPhoto({ src, alt, className, eager = false }: UserPhotoProps) {
   return (
-    <img
+    <Image
       src={src}
       alt={alt}
+      fill
+      unoptimized
+      sizes="100vw"
       loading={eager ? 'eager' : 'lazy'}
-      decoding="async"
       referrerPolicy="no-referrer"
       draggable={false}
       className={className}
@@ -904,6 +907,7 @@ export function HyattTierListClient({
   const [isTopExperiencesOpen, setIsTopExperiencesOpen] = useState(false);
   const [isTopUnderratedOpen, setIsTopUnderratedOpen] = useState(false);
   const [isTopReturnStaysOpen, setIsTopReturnStaysOpen] = useState(false);
+  const [isBucketListPickerOpen, setIsBucketListPickerOpen] = useState(false);
   const [selectedBrandName, setSelectedBrandName] = useState<string | null>(null);
   const reorderRequestIdRef = useRef(0);
   const draggedHotelIdRef = useRef<string | null>(null);
@@ -1872,6 +1876,10 @@ export function HyattTierListClient({
     setTopFutureStaysDraft(topFutureStays);
     setTopFutureStaysError(null);
     setIsTopFutureStaysOpen(true);
+  }
+
+  function openBucketListPickerModal() {
+    setIsBucketListPickerOpen(true);
   }
 
   async function handleSaveTopFutureStays() {
@@ -3234,7 +3242,13 @@ export function HyattTierListClient({
         >
           <div className="flex items-center justify-between gap-3">
             <div>
-              <p className="section-label">My Hyatt Bucket List</p>
+              <button
+                type="button"
+                onClick={openBucketListPickerModal}
+                className="section-label transition hover:text-[rgb(var(--wine))]"
+              >
+                My Hyatt Bucket List
+              </button>
             </div>
 
             {bucketListSlides.length ? (
@@ -3877,6 +3891,91 @@ export function HyattTierListClient({
                   </section>
                 );
               })}
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {isBucketListPickerOpen ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-[rgba(42,18,22,0.48)] px-4 py-8 backdrop-blur-sm">
+          <div className="glass-panel max-h-[calc(100vh-3rem)] w-full max-w-5xl overflow-hidden rounded-[30px] p-5 sm:p-7">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="section-label">My Hyatt Bucket List</p>
+                <h2 className="mt-2 text-2xl font-semibold leading-none text-[rgb(var(--page-foreground))] font-[family:var(--font-display)] sm:text-4xl">
+                  Choose a hotel to edit
+                </h2>
+                <div className="mt-2 text-sm text-[rgba(34,58,86,0.62)]">
+                  Click any bucket-list hotel card to open the hotel editor and update the photo, location, or other details.
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setIsBucketListPickerOpen(false)}
+                className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-[rgba(118,31,47,0.16)] bg-white/80 text-lg text-[rgb(var(--wine))] transition hover:bg-[rgba(118,31,47,0.06)]"
+                aria-label="Close bucket list picker"
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="mt-6 max-h-[70vh] overflow-auto pr-1">
+              {bucketListHotels.length ? (
+                <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+                  {bucketListHotels.map((hotel) => {
+                    const brandColor = BRAND_BY_NAME[hotel.brand]?.color ?? '#1D4ED8';
+
+                    return (
+                      <button
+                        key={hotel.id}
+                        type="button"
+                        onClick={() => {
+                          setIsBucketListPickerOpen(false);
+                          openEditModal(hotel);
+                        }}
+                        className="group overflow-hidden rounded-[26px] border border-white/50 bg-[rgba(255,255,255,0.82)] text-left shadow-[0_20px_60px_rgba(26,74,122,0.16)] transition hover:-translate-y-0.5 hover:shadow-[0_28px_64px_rgba(26,74,122,0.2)]"
+                      >
+                        <div className="relative h-52 sm:h-56">
+                          {hotel.bucketListImageUrl ? (
+                            <UserPhoto
+                              src={hotel.bucketListImageUrl}
+                              alt={`${hotel.name} in ${hotel.bucketListLocation}`}
+                              className="absolute inset-0 h-full w-full object-cover transition duration-300 group-hover:scale-[1.03]"
+                            />
+                          ) : (
+                            <div
+                              className="h-full w-full"
+                              style={{
+                                background: `radial-gradient(circle at top left, ${brandColor}66, transparent 34%), linear-gradient(135deg, ${brandColor}26, rgba(18,42,68,0.18))`
+                              }}
+                            />
+                          )}
+
+                          <div className="absolute inset-0 bg-gradient-to-t from-[rgba(8,18,32,0.92)] via-[rgba(12,24,40,0.28)] to-transparent" />
+
+                          <div className="absolute left-4 top-4 rounded-full border border-white/20 bg-[rgba(255,255,255,0.14)] px-3 py-1.5 text-[0.72rem] font-semibold uppercase tracking-[0.14em] text-white shadow-[0_10px_24px_rgba(0,0,0,0.18)] backdrop-blur-md">
+                            {hotel.brand}
+                          </div>
+
+                          <div className="absolute bottom-4 left-4 right-4">
+                            <div className="text-xl font-semibold leading-tight text-white drop-shadow-[0_3px_10px_rgba(0,0,0,0.5)] sm:text-2xl">
+                              {hotel.name}
+                            </div>
+                            <div className="mt-2 text-sm font-medium uppercase tracking-[0.14em] text-white/90 drop-shadow-[0_3px_8px_rgba(0,0,0,0.45)]">
+                              {hotel.bucketListLocation || 'Location needed'}
+                            </div>
+                          </div>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="rounded-[22px] border border-dashed border-[rgba(0,102,179,0.16)] bg-white/58 p-5 text-sm text-[rgba(34,58,86,0.62)]">
+                  Add a bucket-list hotel first, then click My Hyatt Bucket List to edit it from here.
+                </div>
+              )}
             </div>
           </div>
         </div>
