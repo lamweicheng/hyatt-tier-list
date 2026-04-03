@@ -35,6 +35,7 @@ const TOP_EXPERIENCES_STORAGE_KEY = 'hyatt-tier-list.top-experiences';
 const TOP_UNDERRATED_STORAGE_KEY = 'hyatt-tier-list.top-underrated';
 const TOP_RETURN_STAYS_STORAGE_KEY = 'hyatt-tier-list.top-return-stays';
 const DISPLAY_PREFERENCES_STORAGE_KEY = 'hyatt-tier-list.display-preferences';
+const ALL_BUCKET_LIST_BRANDS = '__ALL_BUCKET_LIST_BRANDS__';
 
 const DEFAULT_DRAFT: HotelDraft = {
   name: '',
@@ -908,6 +909,7 @@ export function HyattTierListClient({
   const [isTopUnderratedOpen, setIsTopUnderratedOpen] = useState(false);
   const [isTopReturnStaysOpen, setIsTopReturnStaysOpen] = useState(false);
   const [isBucketListPickerOpen, setIsBucketListPickerOpen] = useState(false);
+  const [selectedBucketListBrandName, setSelectedBucketListBrandName] = useState(ALL_BUCKET_LIST_BRANDS);
   const [selectedBrandName, setSelectedBrandName] = useState<string | null>(null);
   const reorderRequestIdRef = useRef(0);
   const draggedHotelIdRef = useRef<string | null>(null);
@@ -1114,6 +1116,22 @@ export function HyattTierListClient({
     () => sortHotelsByTier(hotels.filter((hotel) => hotel.stayType === 'BUCKET_LIST')),
     [hotels]
   );
+  const bucketListBrandOptions = useMemo(() => {
+    const bucketListBrandNames = new Set(bucketListHotels.map((hotel) => hotel.brand));
+
+    return HYATT_BRANDS.filter((brand) => bucketListBrandNames.has(brand.name)).map((brand) => ({
+      value: brand.name,
+      label: brand.name,
+      color: brand.color
+    }));
+  }, [bucketListHotels]);
+  const filteredBucketListHotels = useMemo(() => {
+    if (selectedBucketListBrandName === ALL_BUCKET_LIST_BRANDS) {
+      return bucketListHotels;
+    }
+
+    return bucketListHotels.filter((hotel) => hotel.brand === selectedBucketListBrandName);
+  }, [bucketListHotels, selectedBucketListBrandName]);
 
   const hotelsByTier = useMemo(() => {
     return TIERS.reduce(
@@ -1144,9 +1162,18 @@ export function HyattTierListClient({
     () => HYATT_BRANDS.filter((brand) => futureHotels.some((hotel) => hotel.brand === brand.name) && !exploredBrandNames.has(brand.name)),
     [exploredBrandNames, futureHotels]
   );
+  useEffect(() => {
+    if (
+      selectedBucketListBrandName !== ALL_BUCKET_LIST_BRANDS
+      && !bucketListBrandOptions.some((option) => option.value === selectedBucketListBrandName)
+    ) {
+      setSelectedBucketListBrandName(ALL_BUCKET_LIST_BRANDS);
+    }
+  }, [bucketListBrandOptions, selectedBucketListBrandName]);
   const loggedSuiteSlides = useMemo<LoggedSuiteEntry[]>(
-    () =>
-      exploredHotels.flatMap((hotel) =>
+    () => {
+      return exploredHotels
+        .flatMap((hotel) =>
         hotel.roomEntries
           .filter((entry) => entry.kind === 'SUITE')
           .map((entry, index) => ({
@@ -1156,7 +1183,20 @@ export function HyattTierListClient({
             stars: entry.stars,
             hotel
           }))
-      ),
+      )
+        .map((entry, index) => ({ entry, index }))
+        .sort((left, right) => {
+          const leftStars = left.entry.stars ?? -1;
+          const rightStars = right.entry.stars ?? -1;
+
+          if (rightStars !== leftStars) {
+            return rightStars - leftStars;
+          }
+
+          return left.index - right.index;
+        })
+        .map(({ entry }) => entry);
+    },
     [exploredHotels]
   );
   const bucketListSlides = useMemo<BucketListSlide[]>(
@@ -3902,12 +3942,6 @@ export function HyattTierListClient({
             <div className="flex items-start justify-between gap-4">
               <div>
                 <p className="section-label">My Hyatt Bucket List</p>
-                <h2 className="mt-2 text-2xl font-semibold leading-none text-[rgb(var(--page-foreground))] font-[family:var(--font-display)] sm:text-4xl">
-                  Choose a hotel to edit
-                </h2>
-                <div className="mt-2 text-sm text-[rgba(34,58,86,0.62)]">
-                  Click any bucket-list hotel card to open the hotel editor and update the photo, location, or other details.
-                </div>
               </div>
 
               <button
@@ -3920,10 +3954,26 @@ export function HyattTierListClient({
               </button>
             </div>
 
+            {bucketListBrandOptions.length ? (
+              <div className="mt-5 max-w-xs">
+                <FancySelect
+                  value={selectedBucketListBrandName}
+                  onChange={setSelectedBucketListBrandName}
+                  options={[
+                    { value: ALL_BUCKET_LIST_BRANDS, label: 'All brands' },
+                    ...bucketListBrandOptions
+                  ]}
+                  placeholder="Filter by brand"
+                  buttonClassName="bg-white/78"
+                />
+              </div>
+            ) : null}
+
             <div className="mt-6 max-h-[70vh] overflow-auto pr-1">
               {bucketListHotels.length ? (
+                filteredBucketListHotels.length ? (
                 <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-                  {bucketListHotels.map((hotel) => {
+                  {filteredBucketListHotels.map((hotel) => {
                     const brandColor = BRAND_BY_NAME[hotel.brand]?.color ?? '#1D4ED8';
 
                     return (
@@ -3971,6 +4021,11 @@ export function HyattTierListClient({
                     );
                   })}
                 </div>
+                ) : (
+                  <div className="rounded-[22px] border border-dashed border-[rgba(0,102,179,0.16)] bg-white/58 p-5 text-sm text-[rgba(34,58,86,0.62)]">
+                    No bucket-list hotels match this brand yet.
+                  </div>
+                )
               ) : (
                 <div className="rounded-[22px] border border-dashed border-[rgba(0,102,179,0.16)] bg-white/58 p-5 text-sm text-[rgba(34,58,86,0.62)]">
                   Add a bucket-list hotel first, then click My Hyatt Bucket List to edit it from here.
