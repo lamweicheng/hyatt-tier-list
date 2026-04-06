@@ -3322,7 +3322,7 @@ export function HyattTierListClient({
                       <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(10,10,10,0.03),rgba(10,10,10,0.16)_28%,rgba(10,10,10,0.72))]" />
 
                       <div className="absolute left-3 top-3 sm:left-4 sm:top-4">
-                        <div className="inline-flex items-center rounded-full border border-white/20 bg-[rgba(255,255,255,0.12)] px-3 py-1.5 text-[0.84rem] font-semibold uppercase tracking-[0.14em] text-white shadow-[0_10px_24px_rgba(0,0,0,0.12)] backdrop-blur-md">
+                        <div className="inline-flex items-center rounded-full border border-white/16 bg-[rgba(8,16,26,0.58)] px-3 py-1.5 text-[0.84rem] font-semibold uppercase tracking-[0.14em] text-white shadow-[0_10px_24px_rgba(0,0,0,0.2)] backdrop-blur-md">
                           {activeSuiteSlide.hotel.brand}
                         </div>
                       </div>
@@ -3503,7 +3503,7 @@ export function HyattTierListClient({
                       <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(10,10,10,0.03),rgba(10,10,10,0.16)_28%,rgba(10,10,10,0.72))]" />
 
                       <div className="absolute left-3 top-3 sm:left-4 sm:top-4">
-                        <div className="inline-flex items-center rounded-full border border-white/20 bg-[rgba(255,255,255,0.12)] px-3 py-1.5 text-[0.84rem] font-semibold uppercase tracking-[0.14em] text-white shadow-[0_10px_24px_rgba(0,0,0,0.12)] backdrop-blur-md">
+                        <div className="inline-flex items-center rounded-full border border-white/16 bg-[rgba(8,16,26,0.58)] px-3 py-1.5 text-[0.84rem] font-semibold uppercase tracking-[0.14em] text-white shadow-[0_10px_24px_rgba(0,0,0,0.2)] backdrop-blur-md">
                           {activeBucketListSlide.hotel.brand}
                         </div>
                       </div>
@@ -3675,7 +3675,7 @@ export function HyattTierListClient({
                         <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(10,10,10,0.03),rgba(10,10,10,0.16)_28%,rgba(10,10,10,0.72))]" />
 
                         <div className="absolute left-3 top-3 sm:left-4 sm:top-4">
-                          <div className="inline-flex items-center rounded-full border border-white/20 bg-[rgba(255,255,255,0.12)] px-3 py-1.5 text-[0.84rem] font-semibold uppercase tracking-[0.14em] text-white shadow-[0_10px_24px_rgba(0,0,0,0.12)] backdrop-blur-md">
+                          <div className="inline-flex items-center rounded-full border border-white/16 bg-[rgba(8,16,26,0.58)] px-3 py-1.5 text-[0.84rem] font-semibold uppercase tracking-[0.14em] text-white shadow-[0_10px_24px_rgba(0,0,0,0.2)] backdrop-blur-md">
                             {activeKellySuiteSlide.hotel.brand}
                           </div>
                         </div>
