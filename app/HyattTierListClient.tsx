@@ -52,7 +52,8 @@ const EMPTY_ROOM_ENTRY: RoomEntry = {
   label: '',
   kind: 'SUITE',
   imageUrl: '',
-  stars: null
+  stars: null,
+  withKelly: false
 };
 
 const MONTH_LABELS = [
@@ -73,7 +74,8 @@ const MONTH_LABELS = [
 const EMPTY_STAY_ENTRY: StayEntry = {
   id: crypto.randomUUID(),
   month: new Date().getMonth() + 1,
-  year: new Date().getFullYear()
+  year: new Date().getFullYear(),
+  withKelly: false
 };
 
 const ROOM_KIND_OPTIONS: Array<{ value: RoomEntryKind; label: string }> = [
@@ -234,6 +236,7 @@ const DEFAULT_SECTION_ORDER: DashboardSectionId[] = [
   'travelTimeline',
   'suiteSlideshow',
   'bucketListSlideshow',
+  'kellyExplorations',
   'topFutureStays',
   'topExperiences',
   'topUnderrated',
@@ -248,6 +251,7 @@ const DEFAULT_DISPLAY_PREFERENCES: DisplayPreferences = {
   showTravelTimeline: true,
   showSuiteSlideshow: true,
   showBucketListSlideshow: true,
+  showKellyExplorations: true,
   showTopFutureStays: true,
   showTopExperiences: true,
   showTopUnderrated: true,
@@ -296,7 +300,8 @@ function normalizeRoomEntries(value: unknown): RoomEntry[] {
       stars:
         entry.stars === 1 || entry.stars === 2 || entry.stars === 3 || entry.stars === 4 || entry.stars === 5
           ? entry.stars
-          : null
+          : null,
+      withKelly: typeof entry.withKelly === 'boolean' ? entry.withKelly : false
     }))
     .filter((entry) => entry.label.trim().length > 0);
 }
@@ -319,7 +324,8 @@ function normalizeStayEntries(value: unknown): StayEntry[] {
       return {
         id: typeof entry.id === 'string' && entry.id ? entry.id : crypto.randomUUID(),
         month,
-        year
+        year,
+        withKelly: typeof entry.withKelly === 'boolean' ? entry.withKelly : false
       };
     })
     .filter((entry): entry is StayEntry => entry !== null)
@@ -794,6 +800,10 @@ function normalizeDisplayPreferences(value: unknown): DisplayPreferences {
       typeof record.showBucketListSlideshow === 'boolean'
         ? record.showBucketListSlideshow
         : DEFAULT_DISPLAY_PREFERENCES.showBucketListSlideshow,
+    showKellyExplorations:
+      typeof record.showKellyExplorations === 'boolean'
+        ? record.showKellyExplorations
+        : DEFAULT_DISPLAY_PREFERENCES.showKellyExplorations,
     showTopFutureStays:
       typeof record.showTopFutureStays === 'boolean'
         ? record.showTopFutureStays
@@ -899,6 +909,7 @@ export function HyattTierListClient({
   const bucketListSectionRef = useRef<HTMLElement | null>(null);
   const [isAllBrandsOpen, setIsAllBrandsOpen] = useState(false);
   const [isExploredBrandsOpen, setIsExploredBrandsOpen] = useState(false);
+  const [isKellyBrandsOpen, setIsKellyBrandsOpen] = useState(false);
   const [isFutureBrandsOpen, setIsFutureBrandsOpen] = useState(false);
   const [isTopOverviewOpen, setIsTopOverviewOpen] = useState(false);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
@@ -908,9 +919,12 @@ export function HyattTierListClient({
   const [isTopExperiencesOpen, setIsTopExperiencesOpen] = useState(false);
   const [isTopUnderratedOpen, setIsTopUnderratedOpen] = useState(false);
   const [isTopReturnStaysOpen, setIsTopReturnStaysOpen] = useState(false);
+  const [isSuitePickerOpen, setIsSuitePickerOpen] = useState(false);
+  const [isKellyHotelsPickerOpen, setIsKellyHotelsPickerOpen] = useState(false);
   const [isBucketListPickerOpen, setIsBucketListPickerOpen] = useState(false);
   const [selectedBucketListBrandName, setSelectedBucketListBrandName] = useState(ALL_BUCKET_LIST_BRANDS);
   const [selectedBrandName, setSelectedBrandName] = useState<string | null>(null);
+  const [activeKellySuiteSlideIndex, setActiveKellySuiteSlideIndex] = useState(0);
   const reorderRequestIdRef = useRef(0);
   const draggedHotelIdRef = useRef<string | null>(null);
   const [topPicks, setTopPicks] = useState<TopPickSlot[]>(initialDashboardPreferences.topPicks);
@@ -1253,6 +1267,18 @@ export function HyattTierListClient({
     );
   }
 
+  function showPreviousKellySuiteSlide() {
+    setActiveKellySuiteSlideIndex((current) =>
+      kellySuiteSlides.length ? (current - 1 + kellySuiteSlides.length) % kellySuiteSlides.length : 0
+    );
+  }
+
+  function showNextKellySuiteSlide() {
+    setActiveKellySuiteSlideIndex((current) =>
+      kellySuiteSlides.length ? (current + 1) % kellySuiteSlides.length : 0
+    );
+  }
+
   useEffect(() => {
     if (!displayPreferences.showSuiteSlideshow || loggedSuiteSlides.length <= 1) {
       return;
@@ -1345,6 +1371,61 @@ export function HyattTierListClient({
     () => exploredHotels.filter((hotel) => hotel.roomEntries.some((entry) => entry.kind === 'SUITE')),
     [exploredHotels]
   );
+  const kellyExplorationHotels = useMemo(
+    () =>
+      sortHotelsByTier(
+        exploredHotels.filter(
+          (hotel) =>
+            hotel.stayEntries.some((entry) => entry.withKelly) ||
+            hotel.roomEntries.some((entry) => entry.kind === 'SUITE' && entry.withKelly)
+        )
+      ),
+    [exploredHotels]
+  );
+  const kellySuiteSlides = useMemo<LoggedSuiteEntry[]>(
+    () =>
+      kellyExplorationHotels
+        .flatMap((hotel) =>
+          hotel.roomEntries
+            .filter((entry) => entry.kind === 'SUITE' && entry.withKelly)
+            .map((entry, index) => ({
+              id: `${hotel.id}-${entry.label}-${index}`,
+              suiteName: entry.label,
+              imageUrl: entry.imageUrl,
+              stars: entry.stars,
+              hotel
+            }))
+        ),
+    [kellyExplorationHotels]
+  );
+  const kellySuiteCount = useMemo(
+    () => kellyExplorationHotels.reduce((total, hotel) => total + hotel.roomEntries.filter((entry) => entry.kind === 'SUITE' && entry.withKelly).length, 0),
+    [kellyExplorationHotels]
+  );
+  const kellyExploredBrandNames = useMemo(
+    () => new Set(kellyExplorationHotels.map((hotel) => hotel.brand)),
+    [kellyExplorationHotels]
+  );
+  const activeKellySuiteSlide = kellySuiteSlides[activeKellySuiteSlideIndex] ?? null;
+  const previousKellySuiteSlide =
+    kellySuiteSlides.length > 1
+      ? kellySuiteSlides[(activeKellySuiteSlideIndex - 1 + kellySuiteSlides.length) % kellySuiteSlides.length]
+      : null;
+  const nextKellySuiteSlide =
+    kellySuiteSlides.length > 1
+      ? kellySuiteSlides[(activeKellySuiteSlideIndex + 1) % kellySuiteSlides.length]
+      : null;
+
+  useEffect(() => {
+    setActiveKellySuiteSlideIndex((current) => {
+      if (kellySuiteSlides.length === 0) {
+        return 0;
+      }
+
+      return Math.min(current, kellySuiteSlides.length - 1);
+    });
+  }, [kellySuiteSlides.length]);
+
   const selectedBrandHotels = useMemo(() => {
     if (!selectedBrandName) {
       return [];
@@ -1686,6 +1767,17 @@ export function HyattTierListClient({
         })
     },
     {
+      id: 'kellyExplorations' as const,
+      label: 'My Hyatt Exploration with Kelly ❤️❤️',
+      description: 'Show or hide your shared explored-hotel section.',
+      shown: displayPreferences.showKellyExplorations,
+      toggle: () =>
+        void updateDisplayPreferences({
+          ...displayPreferences,
+          showKellyExplorations: !displayPreferences.showKellyExplorations
+        })
+    },
+    {
       id: 'topFutureStays' as const,
       label: 'Top 3 Future Stays',
       description: 'Show or hide your anticipated stays podium.',
@@ -1918,6 +2010,14 @@ export function HyattTierListClient({
     setIsTopFutureStaysOpen(true);
   }
 
+  function openSuitePickerModal() {
+    setIsSuitePickerOpen(true);
+  }
+
+  function openKellyHotelsPickerModal() {
+    setIsKellyHotelsPickerOpen(true);
+  }
+
   function openBucketListPickerModal() {
     setIsBucketListPickerOpen(true);
   }
@@ -2098,7 +2198,10 @@ export function HyattTierListClient({
   }
 
   async function resetDashboardLayout() {
-    await updateDisplayPreferences({ ...DEFAULT_DISPLAY_PREFERENCES, sectionOrder: [...DEFAULT_SECTION_ORDER] });
+    await updateDisplayPreferences({
+      ...DEFAULT_DISPLAY_PREFERENCES,
+      sectionOrder: [...DEFAULT_SECTION_ORDER]
+    });
     setIsCompactMode(false);
     setIsTravelTimelineCompactMode(false);
   }
@@ -2293,7 +2396,8 @@ export function HyattTierListClient({
         label: entry.label.trim(),
         kind: entry.kind,
         imageUrl: entry.kind === 'SUITE' ? entry.imageUrl.trim() : '',
-        stars: entry.kind === 'SUITE' ? entry.stars : null
+        stars: entry.kind === 'SUITE' ? entry.stars : null,
+        withKelly: entry.kind === 'SUITE' ? entry.withKelly : false
       }))
       .filter((entry) => entry.label);
 
@@ -2303,12 +2407,13 @@ export function HyattTierListClient({
       stayType: draft.stayType,
       tier: draft.stayType === 'EXPLORED' ? draft.tier ?? 'S' : null,
       roomEntries: draft.stayType === 'BUCKET_LIST' ? [] : cleanedRoomEntries,
-      stayEntries: draft.stayType === 'FUTURE'
+      stayEntries: draft.stayType !== 'BUCKET_LIST'
         ? draft.stayEntries
         .map((entry) => ({
           id: entry.id || crypto.randomUUID(),
           month: Number(entry.month),
-          year: Number(entry.year)
+          year: Number(entry.year),
+          withKelly: entry.withKelly
         }))
         .filter(
           (entry) =>
@@ -3095,7 +3200,13 @@ export function HyattTierListClient({
         >
           <div className="flex items-center justify-between gap-3">
             <div>
-              <p className="section-label">My Suite Explorations</p>
+              <button
+                type="button"
+                onClick={openSuitePickerModal}
+                className="section-label transition hover:text-[rgb(var(--wine))]"
+              >
+                My Suite Explorations
+              </button>
             </div>
 
             {loggedSuiteSlides.length ? (
@@ -3440,6 +3551,189 @@ export function HyattTierListClient({
           ) : (
             <div className="mt-5 rounded-[22px] border border-dashed border-[rgba(0,102,179,0.16)] bg-white/58 p-5 text-sm text-[rgba(34,58,86,0.62)]">
               Add a bucket-list hotel with a location and photo URL to build this carousel.
+            </div>
+          )}
+        </section>
+        ) : null}
+
+        {displayPreferences.showKellyExplorations ? (
+        <section className="glass-panel rounded-[28px] px-4 py-4 sm:px-5 sm:py-5" style={{ order: getSectionOrder('kellyExplorations') }}>
+          <div>
+            <p className="section-label">My Hyatt Exploration with Kelly ❤️❤️</p>
+          </div>
+
+          {kellyExplorationHotels.length ? (
+            <div className="mt-5 space-y-5">
+              <div className="grid gap-3 md:grid-cols-3">
+                <button
+                  type="button"
+                  onClick={openKellyHotelsPickerModal}
+                  className="rounded-[24px] border border-white/50 bg-[rgba(255,255,255,0.82)] p-4 text-left shadow-[0_18px_40px_rgba(26,74,122,0.12)] transition hover:-translate-y-0.5 hover:shadow-[0_24px_48px_rgba(26,74,122,0.16)]"
+                >
+                  <div className="text-[0.72rem] font-semibold uppercase tracking-[0.18em] text-[rgba(34,58,86,0.54)]">
+                    Hotels Explored Together
+                  </div>
+                  <div className="mt-3 text-3xl font-semibold text-[rgb(var(--page-foreground))] sm:text-4xl">
+                    {kellyExplorationHotels.length}
+                  </div>
+                </button>
+
+                <article className="rounded-[24px] border border-white/50 bg-[rgba(255,255,255,0.82)] p-4 shadow-[0_18px_40px_rgba(26,74,122,0.12)]">
+                  <div className="text-[0.72rem] font-semibold uppercase tracking-[0.18em] text-[rgba(34,58,86,0.54)]">
+                    Suites Explored Together
+                  </div>
+                  <div className="mt-3 text-3xl font-semibold text-[rgb(var(--page-foreground))] sm:text-4xl">
+                    {kellySuiteCount}
+                  </div>
+                </article>
+
+                <button
+                  type="button"
+                  onClick={() => setIsKellyBrandsOpen(true)}
+                  className="rounded-[24px] border border-white/50 bg-[rgba(255,255,255,0.82)] p-4 text-left shadow-[0_18px_40px_rgba(26,74,122,0.12)] transition hover:-translate-y-0.5 hover:shadow-[0_24px_48px_rgba(26,74,122,0.16)]"
+                >
+                  <div className="text-[0.72rem] font-semibold uppercase tracking-[0.18em] text-[rgba(34,58,86,0.54)]">
+                    Brands Explored Together
+                  </div>
+                  <div className="mt-3 text-3xl font-semibold text-[rgb(var(--page-foreground))] sm:text-4xl">
+                    {kellyExploredBrandNames.size}
+                  </div>
+                </button>
+              </div>
+
+              {activeKellySuiteSlide ? (
+                <article className="overflow-hidden rounded-[32px] border border-white/8 bg-[#0a121b] shadow-[0_28px_80px_rgba(8,25,43,0.28)]">
+                  <div className="relative min-h-[480px] bg-[#0a121b] sm:min-h-[720px]">
+                    {activeKellySuiteSlide.imageUrl ? (
+                      <UserPhoto
+                        src={activeKellySuiteSlide.imageUrl}
+                        alt={`${activeKellySuiteSlide.hotel.name} ${activeKellySuiteSlide.suiteName}`}
+                        eager
+                        className="absolute inset-0 h-full w-full object-cover scale-[1.08] blur-[10px] opacity-35"
+                      />
+                    ) : (
+                      <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(95,130,162,0.2),transparent_48%),linear-gradient(135deg,rgba(16,27,40,0.98),rgba(10,18,27,1))]" />
+                    )}
+
+                    <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(255,255,255,0.08),transparent_42%),linear-gradient(180deg,rgba(6,14,22,0.18),rgba(6,14,22,0.66)_52%,rgba(6,14,22,0.92))]" />
+
+                    {kellySuiteSlides.length > 1 ? (
+                      <>
+                        <button
+                          type="button"
+                          onClick={showPreviousKellySuiteSlide}
+                          className="absolute left-3 top-1/2 z-20 inline-flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full border border-white/18 bg-[rgba(255,255,255,0.1)] text-lg font-semibold text-white backdrop-blur-md transition hover:bg-[rgba(255,255,255,0.18)] sm:left-6 sm:h-12 sm:w-12"
+                          aria-label="Show previous Kelly suite"
+                        >
+                          ←
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={showNextKellySuiteSlide}
+                          className="absolute right-3 top-1/2 z-20 inline-flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full border border-white/18 bg-[rgba(255,255,255,0.1)] text-lg font-semibold text-white backdrop-blur-md transition hover:bg-[rgba(255,255,255,0.18)] sm:right-6 sm:h-12 sm:w-12"
+                          aria-label="Show next Kelly suite"
+                        >
+                          →
+                        </button>
+                      </>
+                    ) : null}
+
+                    <div className="absolute inset-x-0 top-1/2 z-10 flex -translate-y-1/2 items-center justify-center gap-4 px-3 sm:gap-10 sm:px-8 lg:px-10">
+                      {previousKellySuiteSlide ? (
+                        <button
+                          type="button"
+                          onClick={showPreviousKellySuiteSlide}
+                          className="group relative hidden h-[300px] w-[190px] shrink-0 overflow-hidden rounded-[26px] border border-white/10 shadow-[0_22px_40px_rgba(0,0,0,0.28)] transition hover:-translate-x-1 hover:border-white/18 sm:block md:h-[430px] md:w-[280px] lg:h-[520px] lg:w-[320px] xl:-ml-14"
+                          aria-label={`Preview previous Kelly suite: ${previousKellySuiteSlide.suiteName}`}
+                        >
+                          {previousKellySuiteSlide.imageUrl ? (
+                            <UserPhoto
+                              src={previousKellySuiteSlide.imageUrl}
+                              alt={`${previousKellySuiteSlide.hotel.name} ${previousKellySuiteSlide.suiteName}`}
+                              className="absolute inset-0 h-full w-full object-cover grayscale-[0.18] opacity-70 transition group-hover:opacity-82"
+                            />
+                          ) : (
+                            <div className="absolute inset-0 bg-[linear-gradient(135deg,rgba(126,138,149,0.45),rgba(43,54,67,0.9))]" />
+                          )}
+                          <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(7,18,28,0.16),rgba(7,18,28,0.82))]" />
+                        </button>
+                      ) : null}
+
+                      <div className="relative h-[340px] w-[320px] shrink-0 overflow-hidden rounded-[30px] border border-white/14 shadow-[0_30px_70px_rgba(0,0,0,0.34)] sm:h-[440px] sm:w-[470px] md:h-[520px] md:w-[640px] lg:h-[560px] lg:w-[760px] xl:h-[600px] xl:w-[860px]">
+                        {activeKellySuiteSlide.imageUrl ? (
+                          <UserPhoto
+                            src={activeKellySuiteSlide.imageUrl}
+                            alt={`${activeKellySuiteSlide.hotel.name} ${activeKellySuiteSlide.suiteName}`}
+                            eager
+                            className="absolute inset-0 h-full w-full object-cover"
+                          />
+                        ) : (
+                          <div className="absolute inset-0 bg-[linear-gradient(135deg,rgba(147,176,200,0.78),rgba(41,56,71,0.98))]" />
+                        )}
+
+                        <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(10,10,10,0.03),rgba(10,10,10,0.16)_28%,rgba(10,10,10,0.72))]" />
+
+                        <div className="absolute left-3 top-3 sm:left-4 sm:top-4">
+                          <div className="inline-flex items-center rounded-full border border-white/20 bg-[rgba(255,255,255,0.12)] px-3 py-1.5 text-[0.84rem] font-semibold uppercase tracking-[0.14em] text-white shadow-[0_10px_24px_rgba(0,0,0,0.12)] backdrop-blur-md">
+                            {activeKellySuiteSlide.hotel.brand}
+                          </div>
+                        </div>
+
+                        <div className="absolute bottom-3 left-3 right-3 sm:bottom-4 sm:left-4 sm:right-4">
+                          <div className="w-[60%] max-w-[520px] min-w-[250px] rounded-[24px] border border-white/8 bg-[linear-gradient(145deg,rgba(24,24,24,0.1),rgba(24,24,24,0.22))] p-4 shadow-[0_18px_38px_rgba(0,0,0,0.1)] backdrop-blur-sm sm:max-w-[560px] sm:p-5">
+                            <div className="mt-0 text-xl font-semibold leading-tight text-white drop-shadow-[0_3px_10px_rgba(0,0,0,0.5)] sm:text-[2rem]">
+                              {activeKellySuiteSlide.suiteName}
+                            </div>
+                            <div className="mt-2 text-sm font-medium uppercase tracking-[0.14em] text-white/90 drop-shadow-[0_3px_8px_rgba(0,0,0,0.45)] sm:text-[0.9rem]">
+                              {activeKellySuiteSlide.hotel.name}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+
+                      {nextKellySuiteSlide ? (
+                        <button
+                          type="button"
+                          onClick={showNextKellySuiteSlide}
+                          className="group relative hidden h-[300px] w-[190px] shrink-0 overflow-hidden rounded-[26px] border border-white/10 shadow-[0_22px_40px_rgba(0,0,0,0.28)] transition hover:translate-x-1 hover:border-white/18 sm:block md:h-[430px] md:w-[280px] lg:h-[520px] lg:w-[320px] xl:-mr-14"
+                          aria-label={`Preview next Kelly suite: ${nextKellySuiteSlide.suiteName}`}
+                        >
+                          {nextKellySuiteSlide.imageUrl ? (
+                            <UserPhoto
+                              src={nextKellySuiteSlide.imageUrl}
+                              alt={`${nextKellySuiteSlide.hotel.name} ${nextKellySuiteSlide.suiteName}`}
+                              className="absolute inset-0 h-full w-full object-cover grayscale-[0.18] opacity-70 transition group-hover:opacity-82"
+                            />
+                          ) : (
+                            <div className="absolute inset-0 bg-[linear-gradient(135deg,rgba(126,138,149,0.45),rgba(43,54,67,0.9))]" />
+                          )}
+                          <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(7,18,28,0.16),rgba(7,18,28,0.82))]" />
+                        </button>
+                      ) : null}
+                    </div>
+
+                    {kellySuiteSlides.length ? (
+                      <div className="absolute bottom-0 left-0 right-0 z-10 px-4 pb-4 sm:px-6 sm:pb-6">
+                        <div className="h-1.5 overflow-hidden rounded-full bg-white/12">
+                          <div
+                            className="h-full rounded-full bg-white/72 transition-[width] duration-300"
+                            style={{ width: `${((activeKellySuiteSlideIndex + 1) / kellySuiteSlides.length) * 100}%` }}
+                          />
+                        </div>
+                      </div>
+                    ) : null}
+                  </div>
+                </article>
+              ) : (
+                <div className="rounded-[22px] border border-dashed border-[rgba(0,102,179,0.16)] bg-white/58 p-5 text-sm text-[rgba(34,58,86,0.62)]">
+                  Mark explored stays and suite entries with Kelly ❤️ to build this shared suite carousel.
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="mt-5 rounded-[22px] border border-dashed border-[rgba(0,102,179,0.16)] bg-white/58 p-5 text-sm text-[rgba(34,58,86,0.62)]">
+              Open any explored hotel and mark individual stays or suites with Kelly ❤️ to start building this section.
             </div>
           )}
         </section>
@@ -3936,6 +4230,155 @@ export function HyattTierListClient({
         </div>
       ) : null}
 
+      {isSuitePickerOpen ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-[rgba(42,18,22,0.48)] px-4 py-8 backdrop-blur-sm">
+          <div className="glass-panel max-h-[calc(100vh-3rem)] w-full max-w-5xl overflow-hidden rounded-[30px] p-5 sm:p-7">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="section-label">My Suite Explorations</p>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setIsSuitePickerOpen(false)}
+                className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-[rgba(118,31,47,0.16)] bg-white/80 text-lg text-[rgb(var(--wine))] transition hover:bg-[rgba(118,31,47,0.06)]"
+                aria-label="Close suite picker"
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="mt-6 max-h-[70vh] overflow-auto pr-1">
+              {loggedSuiteSlides.length ? (
+                <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+                  {loggedSuiteSlides.map((suite) => {
+                    const brandColor = BRAND_BY_NAME[suite.hotel.brand]?.color ?? '#1D4ED8';
+
+                    return (
+                      <button
+                        key={suite.id}
+                        type="button"
+                        onClick={() => {
+                          setIsSuitePickerOpen(false);
+                          openEditModal(suite.hotel);
+                        }}
+                        className="group overflow-hidden rounded-[26px] border border-white/50 bg-[rgba(255,255,255,0.82)] text-left shadow-[0_20px_60px_rgba(26,74,122,0.16)] transition hover:-translate-y-0.5 hover:shadow-[0_28px_64px_rgba(26,74,122,0.2)]"
+                      >
+                        <div className="relative h-52 sm:h-56">
+                          {suite.imageUrl ? (
+                            <UserPhoto
+                              src={suite.imageUrl}
+                              alt={`${suite.hotel.name} ${suite.suiteName}`}
+                              className="absolute inset-0 h-full w-full object-cover transition duration-300 group-hover:scale-[1.03]"
+                            />
+                          ) : (
+                            <div
+                              className="h-full w-full"
+                              style={{
+                                background: `radial-gradient(circle at top left, ${brandColor}66, transparent 34%), linear-gradient(135deg, ${brandColor}26, rgba(18,42,68,0.18))`
+                              }}
+                            />
+                          )}
+
+                          <div className="absolute inset-0 bg-gradient-to-t from-[rgba(8,18,32,0.92)] via-[rgba(12,24,40,0.28)] to-transparent" />
+
+                          <div className="absolute left-4 top-4 rounded-full border border-white/20 bg-[rgba(255,255,255,0.14)] px-3 py-1.5 text-[0.72rem] font-semibold uppercase tracking-[0.14em] text-white shadow-[0_10px_24px_rgba(0,0,0,0.18)] backdrop-blur-md">
+                            {suite.hotel.brand}
+                          </div>
+
+                          <div className="absolute right-4 top-4 rounded-full border border-white/20 bg-[rgba(255,255,255,0.14)] px-3 py-1.5 text-[0.72rem] font-semibold uppercase tracking-[0.14em] text-white shadow-[0_10px_24px_rgba(0,0,0,0.18)] backdrop-blur-md">
+                            {suite.stars ? `${suite.stars}/5` : 'Unrated'}
+                          </div>
+
+                          <div className="absolute bottom-4 left-4 right-4">
+                            <div className="text-xl font-semibold leading-tight text-white drop-shadow-[0_3px_10px_rgba(0,0,0,0.5)] sm:text-2xl">
+                              {suite.suiteName}
+                            </div>
+                            <div className="mt-2 text-sm font-medium uppercase tracking-[0.14em] text-white/90 drop-shadow-[0_3px_8px_rgba(0,0,0,0.45)]">
+                              {suite.hotel.name}
+                            </div>
+                          </div>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="rounded-[22px] border border-dashed border-[rgba(0,102,179,0.16)] bg-white/58 p-5 text-sm text-[rgba(34,58,86,0.62)]">
+                  Add suite entries with image URLs to explored hotels and they will appear here.
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {isKellyHotelsPickerOpen ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-[rgba(42,18,22,0.48)] px-4 py-8 backdrop-blur-sm">
+          <div className="glass-panel max-h-[calc(100vh-3rem)] w-full max-w-5xl overflow-hidden rounded-[30px] p-5 sm:p-7">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="section-label">My Hyatt Exploration with Kelly ❤️❤️</p>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setIsKellyHotelsPickerOpen(false)}
+                className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-[rgba(118,31,47,0.16)] bg-white/80 text-lg text-[rgb(var(--wine))] transition hover:bg-[rgba(118,31,47,0.06)]"
+                aria-label="Close Kelly hotels picker"
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="mt-6 max-h-[70vh] overflow-auto pr-1">
+              {kellyExplorationHotels.length ? (
+                <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+                  {kellyExplorationHotels.map((hotel) => {
+                    const kellyStayEntries = hotel.stayEntries.filter((entry) => entry.withKelly);
+                    const brandColor = BRAND_BY_NAME[hotel.brand]?.color ?? '#1D4ED8';
+
+                    return (
+                      <button
+                        key={hotel.id}
+                        type="button"
+                        onClick={() => {
+                          setIsKellyHotelsPickerOpen(false);
+                          openEditModal(hotel);
+                        }}
+                        className="rounded-[24px] border border-white/50 bg-[rgba(255,255,255,0.82)] p-4 text-left shadow-[0_18px_40px_rgba(26,74,122,0.12)] transition hover:-translate-y-0.5 hover:shadow-[0_24px_48px_rgba(26,74,122,0.16)]"
+                      >
+                        <div>
+                          <div
+                            className="inline-block max-w-full rounded-[18px] px-3 py-1.5 text-[0.64rem] font-semibold uppercase leading-[1rem] tracking-[0.08em]"
+                            style={{ backgroundColor: `${brandColor}1A`, color: brandColor }}
+                          >
+                            {hotel.brand}
+                          </div>
+                          <div className="mt-3 text-lg font-semibold text-[rgb(var(--page-foreground))]">
+                            {hotel.name}
+                          </div>
+                        </div>
+
+                        {kellyStayEntries.length ? (
+                          <div className="mt-3 text-sm text-[rgba(34,58,86,0.68)]">
+                            {kellyStayEntries.map((entry) => formatMonthYear(entry)).join(' • ')}
+                          </div>
+                        ) : null}
+                      </button>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="rounded-[22px] border border-dashed border-[rgba(0,102,179,0.16)] bg-white/58 p-5 text-sm text-[rgba(34,58,86,0.62)]">
+                  Open any explored hotel and mark individual stays or suites with Kelly ❤️ to start building this section.
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       {isBucketListPickerOpen ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-[rgba(42,18,22,0.48)] px-4 py-8 backdrop-blur-sm">
           <div className="glass-panel max-h-[calc(100vh-3rem)] w-full max-w-5xl overflow-hidden rounded-[30px] p-5 sm:p-7">
@@ -4029,6 +4472,77 @@ export function HyattTierListClient({
               ) : (
                 <div className="rounded-[22px] border border-dashed border-[rgba(0,102,179,0.16)] bg-white/58 p-5 text-sm text-[rgba(34,58,86,0.62)]">
                   Add a bucket-list hotel first, then click My Hyatt Bucket List to edit it from here.
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {isKellyBrandsOpen ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-[rgba(42,18,22,0.48)] px-4 py-8 backdrop-blur-sm">
+          <div className="glass-panel w-full max-w-4xl rounded-[30px] p-5 sm:p-7">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="section-label">Brands Explored Together</p>
+                <h2 className="mt-2 text-2xl font-semibold leading-none text-[rgb(var(--page-foreground))] font-[family:var(--font-display)] sm:text-4xl">
+                  Hyatt brands with Kelly ❤️❤️
+                </h2>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setIsKellyBrandsOpen(false)}
+                className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-[rgba(118,31,47,0.16)] bg-white/80 text-lg text-[rgb(var(--wine))] transition hover:bg-[rgba(118,31,47,0.06)]"
+                aria-label="Close Kelly brands"
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="mt-6 max-h-[70vh] overflow-auto pr-1">
+              {BRANDS_BY_SEGMENT.length ? (
+                <div className="space-y-5">
+                  {BRANDS_BY_SEGMENT.map(({ segment, brands }) => (
+                    <div key={segment} className="rounded-[24px] border border-[rgba(118,31,47,0.1)] bg-white/60 p-4">
+                      <div className="mb-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-[rgba(64,35,37,0.48)]">
+                        {segment}
+                      </div>
+                      <div className="flex flex-wrap gap-2.5">
+                        {brands.map((brand) => {
+                          const isKellyExplored = kellyExploredBrandNames.has(brand.name);
+                          const brandStyle = getBrandVisualStyle(brand.name, brand.color);
+
+                          return (
+                            <button
+                              key={brand.name}
+                              type="button"
+                              onClick={() => {
+                                if (isKellyExplored) {
+                                  setIsKellyBrandsOpen(false);
+                                  setSelectedBrandName(brand.name);
+                                }
+                              }}
+                              disabled={!isKellyExplored}
+                              className="rounded-2xl border px-3 py-2 text-center text-[0.7rem] font-semibold uppercase leading-[1rem] tracking-[0.08em] shadow-[0_10px_22px_rgba(81,39,43,0.08)] transition hover:-translate-y-0.5 disabled:cursor-default disabled:shadow-none"
+                              style={{
+                                borderColor: isKellyExplored ? brandStyle.borderColor : 'rgba(148,163,184,0.22)',
+                                background: isKellyExplored ? brandStyle.background : 'rgba(148,163,184,0.12)',
+                                color: isKellyExplored ? brandStyle.labelColor : '#94A3B8',
+                                boxShadow: isKellyExplored ? `0 10px 22px ${brandStyle.shadowColor}` : 'none'
+                              }}
+                            >
+                              {brand.name}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="rounded-[22px] border border-dashed border-[rgba(0,102,179,0.16)] bg-white/58 p-5 text-sm text-[rgba(34,58,86,0.62)]">
+                  Mark a stay or suite with Kelly ❤️ to start building this brand palette.
                 </div>
               )}
             </div>
@@ -4921,11 +5435,13 @@ export function HyattTierListClient({
                         stayType: value as StayType,
                         tier: value === 'EXPLORED' ? current.tier ?? 'S' : null,
                         stayEntries:
-                          value === 'FUTURE'
+                          value === 'BUCKET_LIST'
+                            ? []
+                            : value === 'FUTURE'
                             ? current.stayEntries.length > 0
                               ? current.stayEntries
                               : [{ ...EMPTY_STAY_ENTRY, id: crypto.randomUUID() }]
-                            : []
+                            : current.stayEntries
                       }))
                     }
                     options={STAY_TYPE_OPTIONS}
@@ -5069,6 +5585,32 @@ export function HyattTierListClient({
                                   ]}
                                 />
                               </div>
+
+                              <label className="md:col-span-2 flex items-center justify-between gap-4 rounded-[16px] border border-[rgba(0,102,179,0.1)] bg-white/72 px-4 py-3">
+                                <div>
+                                  <div className="text-sm font-semibold text-[rgb(var(--page-foreground))]">Stayed with Kelly ❤️❤️</div>
+                                  <div className="mt-1 text-xs text-[rgba(34,58,86,0.58)]">
+                                    Only turn this on for suites that were part of a Kelly trip.
+                                  </div>
+                                </div>
+
+                                <button
+                                  type="button"
+                                  role="switch"
+                                  aria-checked={entry.withKelly}
+                                  onClick={() =>
+                                    updateRoomEntry(index, (current) => ({
+                                      ...current,
+                                      withKelly: !current.withKelly
+                                    }))
+                                  }
+                                  className={`relative inline-flex h-8 w-14 shrink-0 items-center rounded-full border transition ${entry.withKelly ? 'border-[rgba(0,102,179,0.32)] bg-[rgba(0,102,179,0.18)]' : 'border-[rgba(118,31,47,0.14)] bg-[rgba(34,58,86,0.08)]'}`}
+                                >
+                                  <span
+                                    className={`inline-block h-6 w-6 rounded-full bg-white shadow-[0_4px_12px_rgba(26,74,122,0.2)] transition ${entry.withKelly ? 'translate-x-7' : 'translate-x-1'}`}
+                                  />
+                                </button>
+                              </label>
                             </>
                           ) : null}
                         </div>
@@ -5145,6 +5687,31 @@ export function HyattTierListClient({
                           >
                             Remove
                           </button>
+
+                          {draft.stayType === 'EXPLORED' ? (
+                            <label className="md:col-span-3 flex items-center justify-between gap-4 rounded-[16px] border border-[rgba(0,102,179,0.1)] bg-white/72 px-4 py-3">
+                              <div>
+                                <div className="text-sm font-semibold text-[rgb(var(--page-foreground))]">This stay was with Kelly ❤️❤️</div>
+                              </div>
+
+                              <button
+                                type="button"
+                                role="switch"
+                                aria-checked={entry.withKelly}
+                                onClick={() =>
+                                  updateStayEntry(index, (current) => ({
+                                    ...current,
+                                    withKelly: !current.withKelly
+                                  }))
+                                }
+                                className={`relative inline-flex h-8 w-14 shrink-0 items-center rounded-full border transition ${entry.withKelly ? 'border-[rgba(0,102,179,0.32)] bg-[rgba(0,102,179,0.18)]' : 'border-[rgba(118,31,47,0.14)] bg-[rgba(34,58,86,0.08)]'}`}
+                              >
+                                <span
+                                  className={`inline-block h-6 w-6 rounded-full bg-white shadow-[0_4px_12px_rgba(26,74,122,0.2)] transition ${entry.withKelly ? 'translate-x-7' : 'translate-x-1'}`}
+                                />
+                              </button>
+                            </label>
+                          ) : null}
                         </div>
                       ))}
                     </div>

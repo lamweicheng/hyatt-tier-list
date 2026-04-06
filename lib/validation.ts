@@ -8,14 +8,16 @@ const ROOM_ENTRY_KINDS = ['ROOM', 'SUITE'] as const;
 const stayEntrySchema = z.object({
   id: z.string().trim().min(1).optional(),
   month: z.number().int().min(1, 'Month is required').max(12, 'Month must be between 1 and 12'),
-  year: z.number().int().min(1900, 'Year must be 1900 or later').max(2100, 'Year must be 2100 or earlier')
+  year: z.number().int().min(1900, 'Year must be 1900 or later').max(2100, 'Year must be 2100 or earlier'),
+  withKelly: z.boolean().default(false)
 });
 
 const roomEntrySchema = z.object({
   label: z.string().trim().min(1, 'Room type is required').max(80, 'Max 80 characters'),
   kind: z.enum(ROOM_ENTRY_KINDS),
   imageUrl: z.string().default(''),
-  stars: z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(4), z.literal(5), z.null()]).default(null)
+  stars: z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(4), z.literal(5), z.null()]).default(null),
+  withKelly: z.boolean().default(false)
 });
 
 export const hotelFormSchema = z
@@ -70,12 +72,14 @@ export const hotelFormSchema = z
       label: entry.label.trim(),
       kind: entry.kind,
       imageUrl: entry.kind === 'SUITE' ? entry.imageUrl.trim() : '',
-      stars: entry.kind === 'SUITE' ? entry.stars : null
+      stars: entry.kind === 'SUITE' ? entry.stars : null,
+      withKelly: entry.kind === 'SUITE' ? entry.withKelly : false
     })),
     stayEntries: value.stayEntries.map((entry) => ({
       id: entry.id?.trim() || crypto.randomUUID(),
       month: entry.month,
-      year: entry.year
+      year: entry.year,
+      withKelly: entry.withKelly
     })),
     bucketListLocation: value.stayType === 'BUCKET_LIST' ? value.bucketListLocation.trim() : '',
     bucketListImageUrl: value.stayType === 'BUCKET_LIST' ? value.bucketListImageUrl.trim() : ''
@@ -145,6 +149,7 @@ const dashboardSectionIdSchema = z.union([
   z.literal('travelTimeline'),
   z.literal('suiteSlideshow'),
   z.literal('bucketListSlideshow'),
+  z.literal('kellyExplorations'),
   z.literal('topFutureStays'),
   z.literal('topExperiences'),
   z.literal('topUnderrated'),
@@ -159,11 +164,12 @@ const displayPreferencesSchema = z.object({
   showTravelTimeline: z.boolean(),
   showSuiteSlideshow: z.boolean(),
   showBucketListSlideshow: z.boolean(),
+  showKellyExplorations: z.boolean(),
   showTopFutureStays: z.boolean(),
   showTopExperiences: z.boolean(),
   showTopUnderrated: z.boolean(),
   showTopReturnStays: z.boolean(),
-  sectionOrder: z.array(dashboardSectionIdSchema).length(11)
+  sectionOrder: z.array(dashboardSectionIdSchema).length(12)
 });
 
 export const dashboardPreferencesSchema = z.object({

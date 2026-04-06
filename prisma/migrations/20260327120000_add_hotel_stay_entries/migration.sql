@@ -1,2 +1,0 @@
-ALTER TABLE "Hotel"
-ADD COLUMN "stayEntries" JSONB;

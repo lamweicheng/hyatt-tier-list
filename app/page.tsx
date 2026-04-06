@@ -1,12 +1,14 @@
 import { HyattTierListClient } from './HyattTierListClient';
 import { listDashboardPreferences } from '@/lib/dashboard-preferences';
-import { listHotels, isDatabaseConfigured } from '@/lib/hotels';
+import { isDatabaseConfigured, listHotels } from '@/lib/hotels';
 
 export const dynamic = 'force-dynamic';
 
-export default async function HomePage() {
-  const initialHotels = await listHotels();
-  const initialDashboardPreferences = await listDashboardPreferences();
+export default async function Page() {
+  const [initialHotels, initialDashboardPreferences] = await Promise.all([
+    listHotels(),
+    listDashboardPreferences()
+  ]);
 
   return (
     <HyattTierListClient

@@ -47,7 +47,10 @@ function toHotelRecord(hotel: {
             (entry as unknown as Record<string, unknown>).stars === 4 ||
             (entry as unknown as Record<string, unknown>).stars === 5
               ? ((entry as unknown as Record<string, unknown>).stars as 1 | 2 | 3 | 4 | 5)
-              : null
+              : null,
+          withKelly: typeof (entry as unknown as Record<string, unknown>).withKelly === 'boolean'
+            ? ((entry as unknown as Record<string, unknown>).withKelly as boolean)
+            : false
         }))
     : [];
 
@@ -72,7 +75,10 @@ function toHotelRecord(hotel: {
         .map((entry) => ({
           id: entry.id,
           month: entry.month,
-          year: entry.year
+          year: entry.year,
+          withKelly: typeof (entry as unknown as Record<string, unknown>).withKelly === 'boolean'
+            ? ((entry as unknown as Record<string, unknown>).withKelly as boolean)
+            : false
         }))
     : [];
 

@@ -9,12 +9,14 @@ export type RoomEntry = {
   kind: RoomEntryKind;
   imageUrl: string;
   stars: 1 | 2 | 3 | 4 | 5 | null;
+  withKelly: boolean;
 };
 
 export type StayEntry = {
   id: string;
   month: number;
   year: number;
+  withKelly: boolean;
 };
 
 export type HyattBrand = {
@@ -92,6 +94,7 @@ export type DashboardSectionId =
   | 'travelTimeline'
   | 'suiteSlideshow'
   | 'bucketListSlideshow'
+  | 'kellyExplorations'
   | 'topFutureStays'
   | 'topExperiences'
   | 'topUnderrated'
@@ -105,6 +108,7 @@ export type DisplayPreferences = {
   showTravelTimeline: boolean;
   showSuiteSlideshow: boolean;
   showBucketListSlideshow: boolean;
+  showKellyExplorations: boolean;
   showTopFutureStays: boolean;
   showTopExperiences: boolean;
   showTopUnderrated: boolean;

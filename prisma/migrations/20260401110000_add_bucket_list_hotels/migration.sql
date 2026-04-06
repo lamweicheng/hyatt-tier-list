@@ -1,5 +1,0 @@
-ALTER TYPE "StayType" ADD VALUE IF NOT EXISTS 'BUCKET_LIST';
-
-ALTER TABLE "Hotel"
-ADD COLUMN "bucketListLocation" TEXT,
-ADD COLUMN "bucketListImageUrl" TEXT;
